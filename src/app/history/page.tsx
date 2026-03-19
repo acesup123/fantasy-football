@@ -89,7 +89,7 @@ export default async function HistoryPage() {
       {/* Page header */}
       <div>
         <h1 className="text-4xl font-black tracking-tight">League History</h1>
-        <p className="text-muted text-sm mt-1 font-semibold">The legacy of the Bust A Nut League</p>
+        <p className="text-muted text-sm mt-1 font-semibold">16 seasons of BANL history</p>
       </div>
 
       {/* Trophy Case */}

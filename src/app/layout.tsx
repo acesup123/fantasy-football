@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "BANL Fantasy Football",
-  description: "Draft, trade, and manage the Bust A Nut League",
+  description: "Draft, trade, and manage the BANL",
 };
 
 export default function RootLayout({

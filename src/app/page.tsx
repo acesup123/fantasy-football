@@ -62,7 +62,7 @@ export default async function HomePage() {
     .map((s) => s.teamName)
     .filter(Boolean);
   const todayIndex = Math.floor(Date.now() / 86400000) % (allTeamNames.length || 1);
-  const teamNameOfDay = allTeamNames[todayIndex] ?? "Bust A Nut League";
+  const teamNameOfDay = allTeamNames[todayIndex] ?? "BANL Fantasy Football";
 
   return (
     <div className="space-y-12">
@@ -80,7 +80,6 @@ export default async function HomePage() {
             </span>
           </h1>
           <p className="text-xl md:text-2xl font-bold text-foreground/80 tracking-wide mb-1">
-            Bust A Nut League
           </p>
           <p className="text-muted text-sm font-semibold tracking-widest uppercase">
             Draft. Trade. Dominate.
