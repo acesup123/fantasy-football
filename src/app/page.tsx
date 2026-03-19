@@ -15,14 +15,14 @@ export default async function HomePage() {
   const draftPickCount = picksRes.count ?? 0;
   const tradeCount = tradesRes.count ?? 0;
 
-  // Get most recent champion
-  const { data: latestChamp } = await supabase
+  // Get most recent champion — order by season year, not ID
+  const { data: allChamps } = await supabase
     .from("season_results")
     .select("seasons(year), owners(name)")
-    .eq("playoff_result", "champion")
-    .order("season_id", { ascending: false })
-    .limit(1)
-    .single();
+    .eq("playoff_result", "champion");
+
+  const latestChamp = (allChamps ?? [])
+    .sort((a: any, b: any) => (b.seasons?.year ?? 0) - (a.seasons?.year ?? 0))[0] ?? null;
 
   return (
     <div className="space-y-10">

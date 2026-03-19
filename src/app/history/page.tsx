@@ -29,7 +29,8 @@ export default async function HistoryPage() {
     .eq("playoff_result", "champion")
     .order("season_id", { ascending: false });
 
-  const champions = (champRows ?? []) as unknown as ChampionRow[];
+  const champions = ((champRows ?? []) as unknown as ChampionRow[])
+    .sort((a, b) => b.seasons.year - a.seasons.year);
 
   // Get all runners-up
   const { data: runnerUpRows } = await supabase
