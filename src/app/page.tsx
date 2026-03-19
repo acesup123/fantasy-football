@@ -4,7 +4,7 @@ export default async function HomePage() {
   const supabase = await createClient();
 
   const [seasonsRes, ownersRes, picksRes, tradesRes] = await Promise.all([
-    supabase.from("seasons").select("id").order("year", { ascending: false }),
+    supabase.from("seasons").select("id").eq("draft_status", "complete").order("year", { ascending: false }),
     supabase.from("owners").select("id, is_active"),
     supabase.from("draft_picks").select("id", { count: "exact", head: true }),
     supabase.from("trades").select("id", { count: "exact", head: true }),
