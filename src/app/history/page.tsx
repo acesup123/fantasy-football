@@ -81,110 +81,172 @@ export default async function HistoryPage() {
       return winPctB - winPctA;
     });
 
-  return (
-    <div className="space-y-8">
-      <h1 className="text-3xl font-bold">League History</h1>
+  const latestChamp = champions[0] ?? null;
+  const pastChamps = champions.slice(1);
 
-      {/* Champions */}
+  return (
+    <div className="space-y-12">
+      {/* Page header */}
+      <div>
+        <h1 className="text-4xl font-black tracking-tight">League History</h1>
+        <p className="text-muted text-sm mt-1 font-semibold">The legacy of the Bust A Nut League</p>
+      </div>
+
+      {/* Trophy Case */}
       <section>
-        <h2 className="text-xl font-semibold mb-4">Champions</h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-          {champions.map((c) => (
-            <div
-              key={c.seasons.year}
-              className="bg-card border border-gold/20 rounded-xl p-4 text-center champion-glow"
-            >
-              <div className="text-xs text-muted">{c.seasons.year}</div>
-              <div className="text-sm font-black mt-1 text-gold">{c.owners.name}</div>
-              <div className="text-[10px] text-muted mt-0.5">
-                def. {runnerUpMap.get(c.seasons.year) ?? "—"}
+        <div className="section-header">
+          <h2 className="text-xl font-black uppercase tracking-wide">&#127942; Trophy Case</h2>
+        </div>
+
+        {/* Latest champion — featured large */}
+        {latestChamp && (
+          <div className="champion-card-featured rounded-2xl p-8 mb-6">
+            <div className="flex flex-col md:flex-row items-center gap-6">
+              <div className="trophy-display text-7xl float-animation flex-shrink-0">
+                <span>&#127942;</span>
+              </div>
+              <div className="text-center md:text-left">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-gold/80 font-bold mb-1">
+                  Reigning Champion &middot; {latestChamp.seasons.year}
+                </div>
+                <div className="text-4xl md:text-5xl font-black text-gold gold-pulse">
+                  {latestChamp.owners.name}
+                </div>
+                <div className="text-sm text-muted mt-2">
+                  defeated <span className="text-foreground font-semibold">{runnerUpMap.get(latestChamp.seasons.year) ?? "---"}</span> in the championship
+                </div>
               </div>
             </div>
-          ))}
-        </div>
+          </div>
+        )}
+
+        {/* Past champions grid */}
+        {pastChamps.length > 0 && (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+            {pastChamps.map((c) => (
+              <div key={c.seasons.year} className="champion-card rounded-xl p-4 text-center">
+                <div className="text-2xl mb-1">&#127942;</div>
+                <div className="text-[10px] text-muted font-bold uppercase tracking-wider">{c.seasons.year}</div>
+                <div className="text-sm font-black mt-1 text-gold">{c.owners.name}</div>
+                <div className="text-[10px] text-muted mt-1">
+                  def. <span className="text-foreground/70">{runnerUpMap.get(c.seasons.year) ?? "---"}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* All-time standings */}
       <section>
-        <h2 className="text-xl font-semibold mb-4">All-Time Standings</h2>
-        <div className="bg-card border border-border rounded-xl overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border text-[10px] text-muted uppercase tracking-wider">
-                <th className="text-left px-4 py-2">#</th>
-                <th className="text-left px-4 py-2">Owner</th>
-                <th className="text-center px-4 py-2">W</th>
-                <th className="text-center px-4 py-2">L</th>
-                <th className="text-center px-4 py-2">T</th>
-                <th className="text-center px-4 py-2">Win%</th>
-                <th className="text-right px-4 py-2">PF</th>
-                <th className="text-right px-4 py-2">PA</th>
-                <th className="text-center px-4 py-2">Titles</th>
-                <th className="text-center px-4 py-2">Yrs</th>
-              </tr>
-            </thead>
-            <tbody>
-              {allTimeStandings.map((s, i) => {
-                const total = s.wins + s.losses + s.ties;
-                const winPct = total > 0 ? (s.wins / total) : 0;
-                return (
-                  <tr
-                    key={s.id}
-                    className="border-b border-border/20 hover:bg-card-hover transition-colors"
-                  >
-                    <td className="px-4 py-2 text-sm text-muted">{i + 1}</td>
-                    <td className="px-4 py-2 text-sm font-semibold">
-                      <a href={`/owners/${s.id}`} className="hover:text-accent">
-                        {s.name}
-                      </a>
-                    </td>
-                    <td className="px-4 py-2 text-sm text-center">{s.wins}</td>
-                    <td className="px-4 py-2 text-sm text-center">{s.losses}</td>
-                    <td className="px-4 py-2 text-sm text-center">{s.ties}</td>
-                    <td className="px-4 py-2 text-sm text-center font-mono">
-                      {(winPct * 100).toFixed(1)}%
-                    </td>
-                    <td className="px-4 py-2 text-sm text-right font-mono">
-                      {s.pointsFor.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-                    </td>
-                    <td className="px-4 py-2 text-sm text-right font-mono">
-                      {s.pointsAgainst.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-                    </td>
-                    <td className="px-4 py-2 text-sm text-center">
-                      {s.titles > 0 ? (
-                        <span className="text-gold font-bold">{s.titles}</span>
-                      ) : (
-                        <span className="text-muted">0</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2 text-sm text-center text-muted">{s.seasons}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="section-header">
+          <h2 className="text-xl font-black uppercase tracking-wide">All-Time Standings</h2>
+        </div>
+        <div className="glass-card rounded-2xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="leaderboard-table">
+              <thead>
+                <tr>
+                  <th className="text-left w-12">#</th>
+                  <th className="text-left">Owner</th>
+                  <th className="text-center">W</th>
+                  <th className="text-center">L</th>
+                  <th className="text-center">T</th>
+                  <th className="text-left" style={{ minWidth: "140px" }}>Win%</th>
+                  <th className="text-right">PF</th>
+                  <th className="text-right">PA</th>
+                  <th className="text-center">Titles</th>
+                  <th className="text-center">Yrs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allTimeStandings.map((s, i) => {
+                  const total = s.wins + s.losses + s.ties;
+                  const winPct = total > 0 ? (s.wins / total) : 0;
+                  const rank = i + 1;
+                  return (
+                    <tr key={s.id}>
+                      <td>
+                        <div className={`rank-badge ${rank === 1 ? "rank-1" : rank === 2 ? "rank-2" : rank === 3 ? "rank-3" : "rank-other"}`} style={{ width: "1.5rem", height: "1.5rem", fontSize: "0.7rem" }}>
+                          {rank}
+                        </div>
+                      </td>
+                      <td className="font-bold">
+                        <a href={`/owners/${s.id}`} className="hover:text-accent transition-colors">
+                          {s.name}
+                        </a>
+                      </td>
+                      <td className="text-center font-mono font-bold text-accent">{s.wins}</td>
+                      <td className="text-center font-mono text-muted">{s.losses}</td>
+                      <td className="text-center font-mono text-muted">{s.ties}</td>
+                      <td>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-black text-sm w-12">
+                            {(winPct * 100).toFixed(1)}%
+                          </span>
+                          <div className="win-bar-track flex-1">
+                            <div
+                              className={`win-bar-fill ${rank === 1 ? "win-bar-fill-gold" : ""}`}
+                              style={{ width: `${winPct * 100}%` }}
+                            />
+                          </div>
+                        </div>
+                      </td>
+                      <td className="text-right font-mono">
+                        {s.pointsFor.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                      </td>
+                      <td className="text-right font-mono text-muted">
+                        {s.pointsAgainst.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                      </td>
+                      <td className="text-center">
+                        {s.titles > 0 ? (
+                          <span className="text-gold font-black">
+                            {Array.from({ length: s.titles }).map((_, j) => (
+                              <span key={j}>&#127942;</span>
+                            ))}
+                          </span>
+                        ) : (
+                          <span className="text-muted/40">0</span>
+                        )}
+                      </td>
+                      <td className="text-center text-muted font-mono">{s.seasons}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 
-      {/* Links */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <a href="/history/records" className="block bg-card border border-gold/20 rounded-xl p-4 hover:bg-card-hover transition-colors">
-          <h3 className="font-semibold text-gold">Records & Stats</h3>
-          <p className="text-xs text-muted mt-1">Top scores, biggest blowouts, win streaks, and more</p>
-        </a>
-        <a href="/history/head-to-head" className="block bg-card border border-border rounded-xl p-4 hover:bg-card-hover transition-colors">
-          <h3 className="font-semibold text-accent">Head-to-Head</h3>
-          <p className="text-xs text-muted mt-1">All-time records between every pair of owners</p>
-        </a>
-        <a href="/history/drafts" className="block bg-card border border-border rounded-xl p-4 hover:bg-card-hover transition-colors">
-          <h3 className="font-semibold text-rb">Draft History</h3>
-          <p className="text-xs text-muted mt-1">Browse every draft board from every season</p>
-        </a>
-        <a href="/trades" className="block bg-card border border-border rounded-xl p-4 hover:bg-card-hover transition-colors">
-          <h3 className="font-semibold text-warning">Trade Center</h3>
-          <p className="text-xs text-muted mt-1">Propose trades, view history, track pick ownership</p>
-        </a>
-      </div>
+      {/* Explore more */}
+      <section>
+        <div className="section-header">
+          <h2 className="text-xl font-black uppercase tracking-wide">Explore</h2>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <a href="/history/records" className="nav-card nav-card-gold group">
+            <div className="text-2xl mb-2">&#128200;</div>
+            <h3 className="font-black text-gold group-hover:underline underline-offset-4">Records &amp; Stats</h3>
+            <p className="text-xs text-muted mt-1">Top scores, biggest blowouts, win streaks, and more</p>
+          </a>
+          <a href="/history/head-to-head" className="nav-card nav-card-accent group">
+            <div className="text-2xl mb-2">&#9876;&#65039;</div>
+            <h3 className="font-black text-accent group-hover:underline underline-offset-4">Head-to-Head</h3>
+            <p className="text-xs text-muted mt-1">All-time records between every pair of owners</p>
+          </a>
+          <a href="/history/drafts" className="nav-card nav-card-rb group">
+            <div className="text-2xl mb-2">&#128203;</div>
+            <h3 className="font-black text-rb group-hover:underline underline-offset-4">Draft History</h3>
+            <p className="text-xs text-muted mt-1">Browse every draft board from every season</p>
+          </a>
+          <a href="/trades" className="nav-card nav-card-warning group">
+            <div className="text-2xl mb-2">&#128260;</div>
+            <h3 className="font-black text-warning group-hover:underline underline-offset-4">Trade Center</h3>
+            <p className="text-xs text-muted mt-1">Propose trades, view history, track pick ownership</p>
+          </a>
+        </div>
+      </section>
     </div>
   );
 }

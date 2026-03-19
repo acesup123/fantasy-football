@@ -43,59 +43,115 @@ export default async function OwnersPage() {
     return wpB - wpA;
   });
 
-  return (
-    <div className="space-y-6">
-      <h1 className="text-3xl font-bold">Owners</h1>
+  // Track rank among active owners
+  let activeRank = 0;
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+  return (
+    <div className="space-y-8">
+      <div>
+        <h1 className="text-4xl font-black tracking-tight">The Owners</h1>
+        <p className="text-muted text-sm mt-1 font-semibold">Ranked by all-time win percentage</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {sorted.map((owner) => {
           const stats = statsMap.get(owner.id);
           const totalGames = stats ? stats.wins + stats.losses + stats.ties : 0;
-          const winPct = totalGames > 0 ? ((stats!.wins / totalGames) * 100).toFixed(1) : "—";
+          const winPct = totalGames > 0 ? stats!.wins / totalGames : 0;
+          const winPctDisplay = totalGames > 0 ? (winPct * 100).toFixed(1) : "---";
           const ppg = stats && stats.seasons > 0
             ? (stats.pointsFor / (totalGames || 1)).toFixed(1)
-            : "—";
+            : "---";
+
+          const rank = owner.is_active ? ++activeRank : null;
+          const cardClass = !owner.is_active
+            ? "owner-card owner-card-inactive"
+            : rank === 1
+              ? "owner-card owner-card-1"
+              : rank === 2
+                ? "owner-card owner-card-2"
+                : rank === 3
+                  ? "owner-card owner-card-3"
+                  : "owner-card owner-card-default";
 
           return (
             <a
               key={owner.id}
               href={`/owners/${owner.id}`}
-              className={`block bg-card border rounded-xl p-4 hover:bg-card-hover transition-all hover:-translate-y-0.5 ${
-                owner.is_active ? "border-border" : "border-border/50 opacity-60"
-              }`}
+              className={`block p-5 ${cardClass}`}
             >
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center text-accent font-bold text-xs">
-                  {owner.name.split(" ").map((n: string) => n[0]).join("")}
-                </div>
-                <div className="min-w-0">
-                  <h3 className="font-semibold text-sm truncate">{owner.name}</h3>
-                  <p className="text-[10px] text-muted">
-                    Since {owner.joined_year}
-                    {!owner.is_active && " · Inactive"}
-                    {stats && stats.titles > 0 && (
-                      <span className="text-gold ml-1">
-                        {"🏆".repeat(stats.titles)}
+              {/* Top row: Rank + Name + Titles */}
+              <div className="flex items-start gap-3 mb-4">
+                {rank ? (
+                  <div className={`rank-badge ${rank === 1 ? "rank-1" : rank === 2 ? "rank-2" : rank === 3 ? "rank-3" : "rank-other"}`}>
+                    {rank}
+                  </div>
+                ) : (
+                  <div className="rank-badge rank-other" style={{ opacity: 0.4 }}>
+                    --
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-black text-base truncate">{owner.name}</h3>
+                  <p className="text-xs font-bold text-qb truncate mt-0.5">
+                    {owner.team_name || "No Team Name"}
+                  </p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[10px] text-muted">Since {owner.joined_year}</span>
+                    {!owner.is_active && (
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-danger bg-danger/10 px-1.5 py-0.5 rounded">
+                        Inactive
                       </span>
                     )}
-                  </p>
+                  </div>
+                </div>
+                {stats && stats.titles > 0 && (
+                  <div className="flex-shrink-0 text-right">
+                    <div className="text-2xl leading-none">
+                      {Array.from({ length: Math.min(stats.titles, 5) }).map((_, i) => (
+                        <span key={i} className="inline-block" style={{ marginLeft: i > 0 ? "-4px" : "0" }}>
+                          &#127942;
+                        </span>
+                      ))}
+                    </div>
+                    <div className="text-[9px] text-gold font-bold mt-0.5 uppercase tracking-wider">
+                      {stats.titles}x Champ
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Win% bar */}
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] text-muted uppercase tracking-wider font-bold">Win Rate</span>
+                  <span className="text-lg font-black font-mono">
+                    {winPctDisplay}{winPctDisplay !== "---" ? "%" : ""}
+                  </span>
+                </div>
+                <div className="win-bar-track" style={{ height: "8px" }}>
+                  <div
+                    className={`win-bar-fill ${rank === 1 ? "win-bar-fill-gold" : ""}`}
+                    style={{ width: `${winPct * 100}%` }}
+                  />
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div>
-                  <div className="text-sm font-bold">
-                    {stats ? `${stats.wins}-${stats.losses}` : "—"}
+              {/* Stats grid */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="text-center bg-background/30 rounded-lg py-2">
+                  <div className="text-base font-black">
+                    {stats ? `${stats.wins}-${stats.losses}` : "---"}
                   </div>
-                  <div className="text-[10px] text-muted uppercase">Record</div>
+                  <div className="text-[9px] text-muted uppercase tracking-wider font-bold">Record</div>
                 </div>
-                <div>
-                  <div className="text-sm font-bold">{winPct}{winPct !== "—" ? "%" : ""}</div>
-                  <div className="text-[10px] text-muted uppercase">Win%</div>
+                <div className="text-center bg-background/30 rounded-lg py-2">
+                  <div className="text-base font-black font-mono">{ppg}</div>
+                  <div className="text-[9px] text-muted uppercase tracking-wider font-bold">Pts/Gm</div>
                 </div>
-                <div>
-                  <div className="text-sm font-bold">{ppg}</div>
-                  <div className="text-[10px] text-muted uppercase">Pts/Gm</div>
+                <div className="text-center bg-background/30 rounded-lg py-2">
+                  <div className="text-base font-black">{stats?.seasons ?? 0}</div>
+                  <div className="text-[9px] text-muted uppercase tracking-wider font-bold">Seasons</div>
                 </div>
               </div>
             </a>
