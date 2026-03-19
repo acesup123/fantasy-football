@@ -54,14 +54,27 @@ function KeeperBadge({ year }: { year: number }) {
   );
 }
 
+interface HistoricalKeeper {
+  player_name: string;
+  position: string;
+  round: number;
+  keeper_year: number;
+  owner_name: string;
+  owner_id: string;
+}
+
 export default function KeepersPage() {
   const { owner, isAdmin, adminMode, loading: authLoading } = useAuth();
   const [season, setSeason] = useState(2026);
   const [data, setData] = useState<OwnerKeepers[]>([]);
+  const [historicalKeepers, setHistoricalKeepers] = useState<HistoricalKeeper[]>([]);
   const [loading, setLoading] = useState(true);
   const [selections, setSelections] = useState<Map<string, Set<number>>>(new Map());
   const [saving, setSaving] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  const [availableYears, setAvailableYears] = useState<number[]>([2026, 2025]);
+
+  const isCurrentSeason = season === 2026;
 
   // Filter: show all teams in admin mode, only your team otherwise
   const canEditAll = isAdmin && adminMode;
@@ -72,28 +85,51 @@ export default function KeepersPage() {
     : [];
 
   const canEdit = (ownerId: string) =>
-    canEditAll || (owner?.id === ownerId);
+    isCurrentSeason && (canEditAll || (owner?.id === ownerId));
 
-  // Load eligible keepers
+  // Load available years on mount
+  useEffect(() => {
+    async function loadYears() {
+      try {
+        const resp = await fetch("/api/keepers/years");
+        const years = await resp.json();
+        if (Array.isArray(years) && years.length > 0) {
+          setAvailableYears([2026, ...years]);
+        }
+      } catch {}
+    }
+    loadYears();
+  }, []);
+
+  // Load keepers for selected season
   const loadKeepers = useCallback(async () => {
     setLoading(true);
-    try {
-      const resp = await fetch(`/api/keepers/eligible?season=${season}`);
-      const result = await resp.json();
-      setData(result);
+    setHistoricalKeepers([]);
+    setData([]);
 
-      // Initialize selections from any already-elected keepers
-      // (TODO: load from keepers table)
-      const newSelections = new Map<string, Set<number>>();
-      for (const owner of result) {
-        newSelections.set(owner.owner_id, new Set());
+    try {
+      if (isCurrentSeason) {
+        // Current season: load eligible keepers for election
+        const resp = await fetch(`/api/keepers/eligible?season=${season}`);
+        const result = await resp.json();
+        setData(result);
+
+        const newSelections = new Map<string, Set<number>>();
+        for (const o of result) {
+          newSelections.set(o.owner_id, new Set());
+        }
+        setSelections(newSelections);
+      } else {
+        // Historical: load keepers from draft_picks where is_keeper = true
+        const resp = await fetch(`/api/keepers/history?year=${season}`);
+        const result = await resp.json();
+        setHistoricalKeepers(result);
       }
-      setSelections(newSelections);
     } catch (err) {
       console.error("Failed to load keepers:", err);
     }
     setLoading(false);
-  }, [season]);
+  }, [season, isCurrentSeason]);
 
   useEffect(() => {
     loadKeepers();
@@ -182,7 +218,9 @@ export default function KeepersPage() {
         <div>
           <h1 className="text-3xl font-bold">Keeper Management</h1>
           <p className="text-muted text-sm">
-            Select up to 5 keepers per team for the {season} season.
+            {isCurrentSeason
+              ? `Select up to 5 keepers per team for the ${season} season.`
+              : `Viewing keepers used in the ${season} draft.`}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -196,8 +234,11 @@ export default function KeepersPage() {
             onChange={(e) => setSeason(parseInt(e.target.value))}
             className="px-3 py-1.5 bg-card border border-border rounded-lg text-sm focus:outline-none focus:border-accent"
           >
-            <option value={2026}>2026 Season</option>
-            <option value={2025}>2025 Season</option>
+            {availableYears.map((y) => (
+              <option key={y} value={y}>
+                {y} {y === 2026 ? "(Upcoming)" : ""}
+              </option>
+            ))}
           </select>
         </div>
       </div>
@@ -224,6 +265,20 @@ export default function KeepersPage() {
         </div>
       </div>
 
+      {/* Historical keeper view for past seasons */}
+      {!isCurrentSeason && historicalKeepers.length > 0 && (
+        <HistoricalKeepersView keepers={historicalKeepers} />
+      )}
+
+      {!isCurrentSeason && historicalKeepers.length === 0 && !loading && (
+        <div className="bg-card border border-border rounded-xl p-8 text-center text-muted text-sm">
+          No keeper data found for {season}
+        </div>
+      )}
+
+      {/* Current season election UI */}
+      {isCurrentSeason && (
+        <>
       {/* View mode indicator */}
       {!canEditAll && owner && (
         <div className="bg-accent/5 border border-accent/20 rounded-xl p-3 flex items-center justify-between">
@@ -424,6 +479,67 @@ export default function KeepersPage() {
           );
         })}
       </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function HistoricalKeepersView({ keepers }: { keepers: HistoricalKeeper[] }) {
+  // Group by owner
+  const byOwner = new Map<string, HistoricalKeeper[]>();
+  for (const k of keepers) {
+    if (!byOwner.has(k.owner_id)) byOwner.set(k.owner_id, []);
+    byOwner.get(k.owner_id)!.push(k);
+  }
+
+  const POS_BADGE: Record<string, string> = {
+    QB: "pos-qb", RB: "pos-rb", WR: "pos-wr", TE: "pos-te", DEF: "pos-def", K: "pos-def",
+  };
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {Array.from(byOwner.entries())
+        .sort(([, a], [, b]) => b.length - a.length)
+        .map(([ownerId, ownerKeepers]) => (
+          <div
+            key={ownerId}
+            className="bg-card border border-border rounded-xl overflow-hidden"
+          >
+            <div className="px-4 py-2.5 border-b border-border bg-card-elevated/30 flex items-center justify-between">
+              <a href={`/owners/${ownerId}`} className="font-bold text-sm hover:text-accent">
+                {ownerKeepers[0].owner_name}
+              </a>
+              <span className="text-[10px] text-muted">
+                {ownerKeepers.length} keeper{ownerKeepers.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+            <div className="divide-y divide-border/20">
+              {ownerKeepers
+                .sort((a, b) => a.round - b.round)
+                .map((k, i) => (
+                  <div key={i} className="flex items-center gap-3 px-4 py-2">
+                    <span
+                      className={`text-[9px] font-black px-1.5 py-0.5 rounded flex-shrink-0 ${
+                        POS_BADGE[k.position] ?? ""
+                      }`}
+                    >
+                      {k.position}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-semibold truncate">
+                        {k.player_name}
+                      </div>
+                    </div>
+                    <KeeperBadge year={k.keeper_year} />
+                    <div className="text-xs font-bold text-muted">
+                      Rd {k.round}
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </div>
+        ))}
     </div>
   );
 }
