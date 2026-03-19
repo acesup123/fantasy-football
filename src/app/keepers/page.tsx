@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/components/auth/auth-provider";
+import { usePlayerModal } from "@/components/player-modal-provider";
 
 interface KeeperPlayer {
   player_id: number;
@@ -66,6 +67,7 @@ interface HistoricalKeeper {
 
 export default function KeepersPage() {
   const { owner, isAdmin, adminMode, loading: authLoading } = useAuth();
+  const { openPlayer } = usePlayerModal();
   const [season, setSeason] = useState(2026);
   const [data, setData] = useState<OwnerKeepers[]>([]);
   const [historicalKeepers, setHistoricalKeepers] = useState<HistoricalKeeper[]>([]);
@@ -268,7 +270,7 @@ export default function KeepersPage() {
 
       {/* Historical keeper view for past seasons */}
       {!isCurrentSeason && historicalKeepers.length > 0 && (
-        <HistoricalKeepersView keepers={historicalKeepers} />
+        <HistoricalKeepersView keepers={historicalKeepers} onPlayerClick={openPlayer} />
       )}
 
       {!isCurrentSeason && historicalKeepers.length === 0 && !loading && (
@@ -402,9 +404,9 @@ export default function KeepersPage() {
                       {/* Player info */}
                       <div className="flex-1 min-w-0">
                         <div className="text-xs font-semibold truncate">
-                          <a href={`/players/${player.player_id}`} className="hover:text-accent" onClick={(e) => e.stopPropagation()}>
+                          <button className="hover:text-accent text-left" onClick={(e) => { e.stopPropagation(); openPlayer(player.player_id); }}>
                             {player.player_name}
-                          </a>
+                          </button>
                         </div>
                         <div className="text-[10px] text-muted">
                           {player.nfl_team ?? "FA"}
@@ -463,9 +465,9 @@ export default function KeepersPage() {
 
                         <div className="flex-1 min-w-0">
                           <div className="text-xs text-muted line-through truncate">
-                            <a href={`/players/${player.player_id}`} className="hover:text-accent">
+                            <button className="hover:text-accent text-left" onClick={(e) => { e.stopPropagation(); openPlayer(player.player_id); }}>
                               {player.player_name}
-                            </a>
+                            </button>
                           </div>
                           <div className="text-[10px] text-muted/50">
                             {player.nfl_team ?? "FA"}
@@ -490,7 +492,7 @@ export default function KeepersPage() {
   );
 }
 
-function HistoricalKeepersView({ keepers }: { keepers: HistoricalKeeper[] }) {
+function HistoricalKeepersView({ keepers, onPlayerClick }: { keepers: HistoricalKeeper[]; onPlayerClick: (id: number) => void }) {
   // Group by owner
   const byOwner = new Map<string, HistoricalKeeper[]>();
   for (const k of keepers) {
@@ -533,9 +535,9 @@ function HistoricalKeepersView({ keepers }: { keepers: HistoricalKeeper[] }) {
                     </span>
                     <div className="flex-1 min-w-0">
                       <div className="text-xs font-semibold truncate">
-                        <a href={`/players/${k.player_id}`} className="hover:text-accent">
+                        <button className="hover:text-accent text-left" onClick={() => onPlayerClick(k.player_id)}>
                           {k.player_name}
-                        </a>
+                        </button>
                       </div>
                     </div>
                     <KeeperBadge year={k.keeper_year} />
