@@ -167,14 +167,22 @@ export default async function HistoryPage() {
       </section>
 
       {/* Links */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <a href="/history/records" className="block bg-card border border-gold/20 rounded-xl p-4 hover:bg-card-hover transition-colors">
+          <h3 className="font-semibold text-gold">Records & Stats</h3>
+          <p className="text-xs text-muted mt-1">Top scores, biggest blowouts, win streaks, and more</p>
+        </a>
+        <a href="/history/head-to-head" className="block bg-card border border-border rounded-xl p-4 hover:bg-card-hover transition-colors">
+          <h3 className="font-semibold text-accent">Head-to-Head</h3>
+          <p className="text-xs text-muted mt-1">All-time records between every pair of owners</p>
+        </a>
         <a href="/history/drafts" className="block bg-card border border-border rounded-xl p-4 hover:bg-card-hover transition-colors">
-          <h3 className="font-semibold text-accent">Draft History</h3>
+          <h3 className="font-semibold text-rb">Draft History</h3>
           <p className="text-xs text-muted mt-1">Browse every draft board from every season</p>
         </a>
-        <a href="/history/trades" className="block bg-card border border-border rounded-xl p-4 hover:bg-card-hover transition-colors">
-          <h3 className="font-semibold text-warning">Trade History</h3>
-          <p className="text-xs text-muted mt-1">Complete log of every trade ever made</p>
+        <a href="/trades" className="block bg-card border border-border rounded-xl p-4 hover:bg-card-hover transition-colors">
+          <h3 className="font-semibold text-warning">Trade Center</h3>
+          <p className="text-xs text-muted mt-1">Propose trades, view history, track pick ownership</p>
         </a>
       </div>
     </div>
