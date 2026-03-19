@@ -1,4 +1,28 @@
+"use client";
+
+import { useState } from "react";
+
 export default function AdminPage() {
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  const runSync = async () => {
+    setSyncing(true);
+    setSyncStatus("Syncing...");
+    try {
+      const resp = await fetch("/api/sync");
+      const result = await resp.json();
+      if (result.success) {
+        setSyncStatus(`Synced ${result.year} season. ${result.log?.slice(-1)?.[0] ?? "Done!"}`);
+      } else {
+        setSyncStatus(`Error: ${result.error ?? result.log?.slice(-1)?.[0] ?? "Unknown error"}`);
+      }
+    } catch (err) {
+      setSyncStatus("Failed to reach sync endpoint");
+    }
+    setSyncing(false);
+  };
+
   return (
     <div className="space-y-6">
       <h1 className="text-3xl font-bold">League Admin</h1>
@@ -20,6 +44,30 @@ export default function AdminPage() {
           <span className="text-3xl">🎰</span>
         </div>
       </a>
+
+      {/* ESPN Sync */}
+      <div className="bg-card border border-border rounded-xl p-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="font-bold text-sm">ESPN Auto-Sync</h2>
+            <p className="text-xs text-muted mt-0.5">
+              Runs daily at 8am UTC. Syncs standings, matchups, and playoff results.
+            </p>
+            {syncStatus && (
+              <p className={`text-xs mt-1 ${syncStatus.includes("Error") || syncStatus.includes("Failed") ? "text-danger" : "text-accent"}`}>
+                {syncStatus}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={runSync}
+            disabled={syncing}
+            className={`btn-primary text-xs px-4 py-2 ${syncing ? "opacity-50" : ""}`}
+          >
+            {syncing ? "Syncing..." : "Sync Now"}
+          </button>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Season Management */}
