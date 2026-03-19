@@ -32,12 +32,13 @@ export async function GET(request: Request) {
   // Get all keeper picks for this season
   const { data: picks } = await supabase
     .from('draft_picks')
-    .select('round, keeper_year, current_owner_id, players(name, position), owners!draft_picks_current_owner_id_fkey(id, name)')
+    .select('round, keeper_year, current_owner_id, player_id, players(name, position), owners!draft_picks_current_owner_id_fkey(id, name)')
     .eq('season_id', season.id)
     .eq('is_keeper', true)
     .order('round');
 
   const result = (picks ?? []).map((p: any) => ({
+    player_id: p.player_id,
     player_name: p.players?.name ?? 'Unknown',
     position: p.players?.position ?? '?',
     round: p.round,

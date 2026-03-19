@@ -55,6 +55,7 @@ function KeeperBadge({ year }: { year: number }) {
 }
 
 interface HistoricalKeeper {
+  player_id: number;
   player_name: string;
   position: string;
   round: number;
@@ -401,7 +402,9 @@ export default function KeepersPage() {
                       {/* Player info */}
                       <div className="flex-1 min-w-0">
                         <div className="text-xs font-semibold truncate">
-                          {player.player_name}
+                          <a href={`/players/${player.player_id}`} className="hover:text-accent" onClick={(e) => e.stopPropagation()}>
+                            {player.player_name}
+                          </a>
                         </div>
                         <div className="text-[10px] text-muted">
                           {player.nfl_team ?? "FA"}
@@ -460,7 +463,9 @@ export default function KeepersPage() {
 
                         <div className="flex-1 min-w-0">
                           <div className="text-xs text-muted line-through truncate">
-                            {player.player_name}
+                            <a href={`/players/${player.player_id}`} className="hover:text-accent">
+                              {player.player_name}
+                            </a>
                           </div>
                           <div className="text-[10px] text-muted/50">
                             {player.nfl_team ?? "FA"}
@@ -528,7 +533,9 @@ function HistoricalKeepersView({ keepers }: { keepers: HistoricalKeeper[] }) {
                     </span>
                     <div className="flex-1 min-w-0">
                       <div className="text-xs font-semibold truncate">
-                        {k.player_name}
+                        <a href={`/players/${k.player_id}`} className="hover:text-accent">
+                          {k.player_name}
+                        </a>
                       </div>
                     </div>
                     <KeeperBadge year={k.keeper_year} />

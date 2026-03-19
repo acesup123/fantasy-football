@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useParams } from "next/navigation";
 import { DraftBoard } from "./components/draft-board";
 import { PlayerPool } from "./components/player-pool";
 import { DraftControls } from "./components/draft-controls";
@@ -8,10 +9,12 @@ import { TradeModal } from "./components/trade-modal";
 import { LiveTicker } from "./components/live-ticker";
 import type { DraftPick, Player, Owner, Season, Trade } from "@/types/database";
 import { LEAGUE_CONFIG } from "@/types/database";
-import { generateSnakeOrder } from "@/lib/draft/snake-order";
+import { createClient } from "@/lib/supabase/client";
+import { subscribeToDraft } from "@/lib/draft/subscriptions";
+import { useAuth } from "@/components/auth/auth-provider";
 
 // ============================================================
-// DEMO DATA — makes the board look alive before Supabase
+// DEMO DATA — fallback when no Supabase data is available
 // ============================================================
 const TEAM_NAMES = [
   "Mahomes' Militia", "King Henry's Court", "Jefferson Airplane",
@@ -92,104 +95,187 @@ const DEMO_SEASON: Season = {
   draft_status: "drafting",
   draft_order: DEMO_OWNERS.map((o) => o.id),
   pick_timer_seconds: 120,
-  current_pick_number: 13, // Start at round 2 so round 1 shows filled
+  current_pick_number: 13,
   draft_started_at: new Date().toISOString(),
   trade_deadline: null,
   is_current: true,
   created_at: new Date().toISOString(),
 };
 
-// Pre-fill round 1 with picks to show how the board looks
-function generateRound1Picks(draftSlots: ReturnType<typeof generateSnakeOrder>): DraftPick[] {
-  const round1Players = [
-    20, 40, 21, 1, 43, 24, 2, 22, 41, 42, 23, 44 // CMC, Chase, Bijan, Mahomes, JJ, Saquon, Allen, Breece, Tyreek, CeeDee, Henry, Amon-Ra
-  ];
-
-  return draftSlots.map((slot) => {
-    const isRound1 = slot.round === 1;
-    const playerId = isRound1 ? round1Players[slot.pickInRound - 1] : null;
-
-    return {
-      id: slot.overallPick,
-      season_id: 1,
-      round: slot.round,
-      pick_in_round: slot.pickInRound,
-      overall_pick: slot.overallPick,
-      original_owner_id: slot.ownerId,
-      current_owner_id: slot.ownerId,
-      player_id: playerId ?? null,
-      is_keeper: isRound1 && [0, 3, 5].includes(slot.pickInRound - 1), // Some keepers
-      keeper_year: isRound1 && slot.pickInRound === 1 ? 3 : isRound1 && slot.pickInRound === 4 ? 1 : isRound1 && slot.pickInRound === 6 ? 2 : null,
-      picked_at: isRound1 ? new Date().toISOString() : null,
-      is_auto_pick: false,
-      created_at: new Date().toISOString(),
-    };
-  });
-}
-
 export default function DraftPage() {
-  const [season, setSeason] = useState<Season>(DEMO_SEASON);
-  const [owners] = useState<Owner[]>(DEMO_OWNERS);
-  const [players] = useState<Player[]>(DEMO_PLAYERS);
-  const [currentOwnerId] = useState<string>("owner-1"); // Will come from auth
+  const params = useParams<{ seasonId: string }>();
+  const seasonId = params.seasonId;
+  const { owner: authOwner } = useAuth();
+  const supabase = useMemo(() => createClient(), []);
+
+  const [season, setSeason] = useState<Season | null>(null);
+  const [owners, setOwners] = useState<Owner[]>([]);
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [picks, setPicks] = useState<DraftPick[]>([]);
+  const [pendingTrades, setPendingTrades] = useState<Trade[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showTradeModal, setShowTradeModal] = useState(false);
-  const [pendingTrades] = useState<Trade[]>([]);
   const [recentPickId, setRecentPickId] = useState<number | undefined>(undefined);
+  const [pickError, setPickError] = useState<string | null>(null);
 
-  // Generate draft slots
-  const draftSlots = useMemo(
-    () => generateSnakeOrder(season.draft_order),
-    [season.draft_order]
-  );
+  const subscriptionsRef = useRef<{ unsubscribeAll: () => void } | null>(null);
 
-  // Initialize picks with round 1 pre-filled
-  const [picks, setPicks] = useState<DraftPick[]>(() =>
-    generateRound1Picks(draftSlots)
-  );
+  // ---- Fetch initial data ----
+  useEffect(() => {
+    let cancelled = false;
 
-  // Current pick info
-  const currentPickNumber = season.current_pick_number ?? 1;
+    async function fetchData() {
+      setLoading(true);
+      setError(null);
+
+      try {
+        // Fetch season — try by year first, then by id
+        let seasonData: Season | null = null;
+        const yearNum = parseInt(seasonId, 10);
+
+        if (!isNaN(yearNum) && yearNum >= 2000 && yearNum <= 2100) {
+          // Looks like a year
+          const { data } = await supabase
+            .from("seasons")
+            .select("*")
+            .eq("year", yearNum)
+            .single();
+          seasonData = data;
+        }
+
+        if (!seasonData) {
+          // Try as a direct season ID
+          const { data } = await supabase
+            .from("seasons")
+            .select("*")
+            .eq("id", seasonId)
+            .single();
+          seasonData = data;
+        }
+
+        if (cancelled) return;
+
+        if (!seasonData) {
+          setError(`Season "${seasonId}" not found`);
+          setLoading(false);
+          return;
+        }
+
+        // Fetch owners, picks, players, and pending trades in parallel
+        const [ownersRes, picksRes, playersRes, tradesRes] = await Promise.all([
+          supabase
+            .from("owners")
+            .select("*")
+            .eq("is_active", true)
+            .order("name"),
+          supabase
+            .from("draft_picks")
+            .select("*")
+            .eq("season_id", seasonData.id)
+            .order("overall_pick"),
+          supabase
+            .from("players")
+            .select("*")
+            .eq("is_active", true)
+            .order("name"),
+          supabase
+            .from("trades")
+            .select("*")
+            .eq("season_id", seasonData.id)
+            .eq("status", "pending"),
+        ]);
+
+        if (cancelled) return;
+
+        setSeason(seasonData);
+        setOwners(ownersRes.data ?? []);
+        setPicks(picksRes.data ?? []);
+        setPlayers(playersRes.data ?? []);
+        setPendingTrades(tradesRes.data ?? []);
+      } catch (err) {
+        if (!cancelled) {
+          setError("Failed to load draft data");
+          console.error(err);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    fetchData();
+    return () => { cancelled = true; };
+  }, [seasonId, supabase]);
+
+  // ---- Real-time subscriptions ----
+  useEffect(() => {
+    if (!season) return;
+
+    const subs = subscribeToDraft(supabase, season.id, {
+      onPick: (updatedPick: DraftPick) => {
+        setPicks((prev) => {
+          const idx = prev.findIndex((p) => p.id === updatedPick.id);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = updatedPick;
+            return next;
+          }
+          // New pick — insert in order
+          return [...prev, updatedPick].sort(
+            (a, b) => a.overall_pick - b.overall_pick
+          );
+        });
+
+        // Flash the recent pick
+        if (updatedPick.player_id) {
+          setRecentPickId(updatedPick.id);
+          setTimeout(() => setRecentPickId(undefined), 2000);
+        }
+      },
+      onTrade: (trade: Trade) => {
+        setPendingTrades((prev) => {
+          if (trade.status === "pending") {
+            const exists = prev.find((t) => t.id === trade.id);
+            return exists
+              ? prev.map((t) => (t.id === trade.id ? trade : t))
+              : [...prev, trade];
+          }
+          // No longer pending — remove
+          return prev.filter((t) => t.id !== trade.id);
+        });
+      },
+      onStatusChange: (updated: Partial<Season>) => {
+        setSeason((prev) =>
+          prev ? { ...prev, ...updated } : prev
+        );
+      },
+    });
+
+    subscriptionsRef.current = subs;
+
+    return () => {
+      subs.unsubscribeAll();
+      subscriptionsRef.current = null;
+    };
+  }, [season?.id, supabase]);
+
+  // ---- Derived state ----
+  const currentOwnerId = authOwner?.id ?? "";
+
+  const currentPickNumber = season?.current_pick_number ?? 1;
   const currentPick = picks.find((p) => p.overall_pick === currentPickNumber);
   const nextPick = picks.find((p) => p.overall_pick === currentPickNumber + 1);
   const isMyTurn = currentPick?.current_owner_id === currentOwnerId;
 
-  // Make a pick
-  const makePick = useCallback(
-    (playerId: number) => {
-      if (!isMyTurn || !currentPick) return;
-
-      setRecentPickId(currentPick.id);
-
-      setPicks((prev) =>
-        prev.map((p) =>
-          p.overall_pick === currentPickNumber
-            ? {
-                ...p,
-                player_id: playerId,
-                picked_at: new Date().toISOString(),
-              }
-            : p
-        )
-      );
-
-      setSeason((prev) => ({
-        ...prev,
-        current_pick_number: currentPickNumber + 1,
-      }));
-
-      // Clear recent pick animation after delay
-      setTimeout(() => setRecentPickId(undefined), 2000);
-    },
-    [isMyTurn, currentPick, currentPickNumber]
+  const draftedPlayerIds = useMemo(
+    () => new Set(picks.filter((p) => p.player_id !== null).map((p) => p.player_id)),
+    [picks]
+  );
+  const availablePlayers = useMemo(
+    () => players.filter((p) => !draftedPlayerIds.has(p.id)),
+    [players, draftedPlayerIds]
   );
 
-  // Available players
-  const draftedPlayerIds = new Set(
-    picks.filter((p) => p.player_id !== null).map((p) => p.player_id)
-  );
-  const availablePlayers = players.filter((p) => !draftedPlayerIds.has(p.id));
-
-  // Lookups
   const ownerMap = useMemo(
     () => new Map(owners.map((o) => [o.id, o])),
     [owners]
@@ -199,6 +285,141 @@ export default function DraftPage() {
     [players]
   );
 
+  // ---- Make a pick (POST to API) ----
+  const makePick = useCallback(
+    async (playerId: number) => {
+      if (!isMyTurn || !currentPick || !season) return;
+      setPickError(null);
+
+      try {
+        const res = await fetch("/api/draft/pick", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            season_id: season.id,
+            overall_pick: currentPickNumber,
+            player_id: playerId,
+            owner_id: currentOwnerId,
+          }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          setPickError(data.error ?? "Failed to make pick");
+          return;
+        }
+
+        // Optimistic update (real-time will also fire)
+        setRecentPickId(currentPick.id);
+        setPicks((prev) =>
+          prev.map((p) =>
+            p.overall_pick === currentPickNumber
+              ? { ...p, player_id: playerId, picked_at: new Date().toISOString() }
+              : p
+          )
+        );
+        setSeason((prev) =>
+          prev ? { ...prev, current_pick_number: currentPickNumber + 1 } : prev
+        );
+        setTimeout(() => setRecentPickId(undefined), 2000);
+      } catch {
+        setPickError("Network error — try again");
+      }
+    },
+    [isMyTurn, currentPick, season, currentPickNumber, currentOwnerId]
+  );
+
+  // ---- Use demo data as fallback ----
+  const useDemoData =
+    !loading && !season && !error;
+
+  const displaySeason = season ?? (useDemoData ? DEMO_SEASON : null);
+  const displayOwners = owners.length > 0 ? owners : (useDemoData ? DEMO_OWNERS : []);
+  const displayPlayers = players.length > 0 ? players : (useDemoData ? DEMO_PLAYERS : []);
+  const displayPicks = picks;
+  const displayAvailable = availablePlayers.length > 0 || picks.length > 0
+    ? availablePlayers
+    : (useDemoData ? DEMO_PLAYERS : []);
+
+  // ---- Loading state ----
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-center space-y-3">
+          <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-sm text-muted">Loading draft...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- Error state ----
+  if (error && !displaySeason) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-center space-y-3">
+          <p className="text-lg font-semibold text-red-400">{error}</p>
+          <p className="text-sm text-muted">Check the URL and try again.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!displaySeason) return null;
+
+  // ---- Pre-draft lobby ----
+  if (displaySeason.draft_status !== "drafting" && displaySeason.draft_status !== "complete") {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-center space-y-4 max-w-md">
+          <h1 className="text-2xl font-black tracking-tight">
+            {displaySeason.year} Draft
+          </h1>
+          <div className="card p-6 space-y-3">
+            <div className="text-sm font-semibold text-muted uppercase tracking-wider">
+              {displaySeason.draft_status === "pending" && "Draft Not Started"}
+              {displaySeason.draft_status === "keepers_open" && "Keeper Selection Open"}
+              {displaySeason.draft_status === "keepers_locked" && "Keepers Locked — Waiting for Draft"}
+            </div>
+            <p className="text-sm text-muted">
+              {displaySeason.draft_status === "pending"
+                ? "The commissioner hasn't opened the draft yet."
+                : displaySeason.draft_status === "keepers_open"
+                  ? "Owners are still selecting keepers. The draft will begin once keepers are locked."
+                  : "Keepers are locked. The commissioner will start the draft soon."}
+            </p>
+            {authOwner?.is_commissioner && (displaySeason.draft_status === "keepers_locked" || displaySeason.draft_status === "pending") && (
+              <button
+                className="btn-primary text-sm mt-4"
+                onClick={async () => {
+                  const res = await fetch("/api/draft/initialize", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ season_id: displaySeason.id }),
+                  });
+                  if (res.ok) {
+                    // Real-time will update the status, but also force a refresh
+                    window.location.reload();
+                  }
+                }}
+              >
+                Initialize Draft
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Recompute display-level derived values using display data
+  const displayOwnerMap = owners.length > 0 ? ownerMap : new Map(displayOwners.map((o) => [o.id, o]));
+  const displayPlayerMap = players.length > 0 ? playerMap : new Map(displayPlayers.map((p) => [p.id, p]));
+  const displayCurrentPick = currentPick ?? null;
+  const displayNextPick = nextPick ?? null;
+  const displayIsMyTurn = season ? isMyTurn : false;
+
   return (
     <div className="space-y-4 pb-8">
       {/* Header */}
@@ -206,15 +427,22 @@ export default function DraftPage() {
         <div className="flex items-center gap-4">
           <div>
             <h1 className="text-2xl font-black tracking-tight">
-              {season.year} Draft
+              {displaySeason.year} Draft
             </h1>
             <div className="flex items-center gap-2 mt-0.5">
-              <div className="flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-                <span className="text-xs font-semibold text-accent uppercase tracking-wider">
-                  Live
+              {displaySeason.draft_status === "drafting" && (
+                <div className="flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+                  <span className="text-xs font-semibold text-accent uppercase tracking-wider">
+                    Live
+                  </span>
+                </div>
+              )}
+              {displaySeason.draft_status === "complete" && (
+                <span className="text-xs font-semibold text-muted uppercase tracking-wider">
+                  Complete
                 </span>
-              </div>
+              )}
               <span className="text-xs text-muted">
                 Pick {currentPickNumber} of{" "}
                 {LEAGUE_CONFIG.NUM_TEAMS * LEAGUE_CONFIG.NUM_ROUNDS}
@@ -223,6 +451,9 @@ export default function DraftPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {pickError && (
+            <span className="text-xs text-red-400 mr-2">{pickError}</span>
+          )}
           {pendingTrades.length > 0 && (
             <button
               onClick={() => setShowTradeModal(true)}
@@ -243,19 +474,19 @@ export default function DraftPage() {
 
       {/* Draft Controls */}
       <DraftControls
-        currentPick={currentPick ?? null}
-        isMyTurn={isMyTurn}
-        ownerMap={ownerMap}
-        timerSeconds={season.pick_timer_seconds}
-        onNextPick={nextPick ?? null}
+        currentPick={displayCurrentPick}
+        isMyTurn={displayIsMyTurn}
+        ownerMap={displayOwnerMap}
+        timerSeconds={displaySeason.pick_timer_seconds}
+        onNextPick={displayNextPick}
       />
 
       {/* Main Layout: Board + Sidebar (Player Pool + Ticker) */}
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_380px] gap-4">
         <DraftBoard
-          picks={picks}
-          owners={owners}
-          playerMap={playerMap}
+          picks={displayPicks}
+          owners={displayOwners}
+          playerMap={displayPlayerMap}
           currentPickNumber={currentPickNumber}
           recentPickId={recentPickId}
         />
@@ -263,14 +494,14 @@ export default function DraftPage() {
         {/* Sidebar */}
         <div className="space-y-4">
           <PlayerPool
-            players={availablePlayers}
-            isMyTurn={isMyTurn}
+            players={displayAvailable}
+            isMyTurn={displayIsMyTurn}
             onPick={makePick}
           />
           <LiveTicker
-            picks={picks}
-            ownerMap={ownerMap}
-            playerMap={playerMap}
+            picks={displayPicks}
+            ownerMap={displayOwnerMap}
+            playerMap={displayPlayerMap}
           />
         </div>
       </div>
@@ -278,10 +509,10 @@ export default function DraftPage() {
       {/* Trade Modal */}
       {showTradeModal && (
         <TradeModal
-          owners={owners}
+          owners={displayOwners}
           currentOwnerId={currentOwnerId}
-          picks={picks}
-          seasonId={season.id}
+          picks={displayPicks}
+          seasonId={displaySeason.id}
           onClose={() => setShowTradeModal(false)}
         />
       )}
