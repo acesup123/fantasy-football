@@ -277,12 +277,16 @@ export function PlayerPool({
                   <button
                     onClick={() => handlePick(player.id)}
                     disabled={blocked}
-                    className={`flex-shrink-0 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all ${
+                    className={`flex-shrink-0 px-3 py-1.5 max-sm:px-4 max-sm:py-2.5 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all ${
                       blocked
                         ? "bg-background/60 text-muted/60 cursor-not-allowed"
                         : confirmingId === player.id
-                          ? "btn-primary py-1 px-2.5 text-[10px]"
-                          : "opacity-0 group-hover:opacity-100 bg-accent/15 text-accent hover:bg-accent/25"
+                          ? "btn-primary py-1.5 px-3 text-[10px]"
+                          : // Reveal-on-hover only where a hover pointer exists.
+                            // A touch device never fires :hover, so gating the
+                            // button on it left phones with an invisible —
+                            // and so unusable — Draft control.
+                            "bg-accent/15 text-accent hover:bg-accent/25 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100"
                     }`}
                   >
                     {blocked

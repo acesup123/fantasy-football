@@ -544,27 +544,32 @@ export default function DraftPage() {
         className={
           boardView === "rosters"
             ? "space-y-3"
-            : "grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-3"
+            : "flex flex-col xl:grid xl:grid-cols-[minmax(0,1fr)_340px] gap-3"
         }
       >
-        <DraftBoard
-          picks={displayPicks}
-          owners={displayOwners}
-          playerMap={displayPlayerMap}
-          currentPickNumber={currentPickNumber}
-          recentPickId={recentPickId}
-          currentOwnerId={currentOwnerId}
-          view={boardView}
-          onViewChange={setBoardView}
-        />
+        {/* Below xl the pool comes first. The board is 15 rounds tall, so
+            leaving it above the pool put the only way to draft a full screen
+            or two down the page on a phone. */}
+        <div className="min-w-0 order-2 xl:order-1">
+          <DraftBoard
+            picks={displayPicks}
+            owners={displayOwners}
+            playerMap={displayPlayerMap}
+            currentPickNumber={currentPickNumber}
+            recentPickId={recentPickId}
+            currentOwnerId={currentOwnerId}
+            view={boardView}
+            onViewChange={setBoardView}
+          />
+        </div>
 
         {/* Player pool + ticker — sidebar on the board, a row under the rosters */}
         <div
-          className={
+          className={`order-1 xl:order-2 ${
             boardView === "rosters"
               ? "grid grid-cols-1 xl:grid-cols-2 gap-3"
               : "space-y-4"
-          }
+          }`}
         >
           <PlayerPool
             players={displayAvailable}

@@ -121,9 +121,11 @@ export function DraftBoard({
         </div>
       ) : (
       // All 12 teams share the width — no horizontal scroll, scroll the page
-      // vertically through the 15 rounds instead.
-      <div>
-        <table className="w-full table-fixed">
+      // vertically through the 15 rounds instead. On a phone 12 columns works
+      // out to ~28px each, which is illegible, so below sm the board keeps a
+      // readable minimum and scrolls sideways within its own box.
+      <div className="overflow-x-auto sm:overflow-x-visible">
+        <table className="w-full table-fixed max-sm:min-w-[680px]">
           <colgroup>
             <col className="w-7" />
             {Array.from({ length: LEAGUE_CONFIG.NUM_TEAMS }, (_, i) => (
