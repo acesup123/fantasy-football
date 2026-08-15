@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import type { DraftPick, Owner } from "@/types/database";
 
 interface DraftControlsProps {
@@ -9,6 +9,10 @@ interface DraftControlsProps {
   ownerMap: Map<string, Owner>;
   timerSeconds: number;
   onNextPick?: DraftPick | null;
+  /** Season the clock belongs to. Omit to fall back to a local countdown. */
+  seasonId?: number;
+  /** Only the commissioner may pause or resume. */
+  canControlClock?: boolean;
 }
 
 export function DraftControls({
@@ -17,25 +21,85 @@ export function DraftControls({
   ownerMap,
   timerSeconds,
   onNextPick,
+  seasonId,
+  canControlClock = false,
 }: DraftControlsProps) {
   const [timeLeft, setTimeLeft] = useState(timerSeconds);
   const [isPaused, setIsPaused] = useState(false);
+  const [clockSynced, setClockSynced] = useState(false);
+  const [busy, setBusy] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  // Server deadline in *local* epoch ms, corrected for this machine's clock skew.
+  const deadlineRef = useRef<number | null>(null);
 
-  // Reset timer when pick changes
+  /**
+   * Pull the shared clock. The server returns its own timestamp, so a client
+   * whose system clock is off still counts down to the same moment.
+   */
+  const syncClock = useCallback(async () => {
+    if (!seasonId) return;
+    try {
+      const resp = await fetch(`/api/draft/clock?season_id=${seasonId}`, { cache: "no-store" });
+      if (!resp.ok) return;
+      const c = await resp.json();
+      const skew = Date.now() - c.serverNow;
+      deadlineRef.current = c.deadline === null ? null : c.deadline + skew;
+      setIsPaused(Boolean(c.paused));
+      setTimeLeft(Math.round(c.remainingMs / 1000));
+      setClockSynced(true);
+    } catch {
+      // Leave the last known state; the local tick keeps running.
+    }
+  }, [seasonId]);
+
+  // Re-sync on mount, when the pick changes, and every few seconds so a pause
+  // by the commissioner reaches everyone quickly.
   useEffect(() => {
-    setTimeLeft(timerSeconds);
-  }, [currentPick?.overall_pick, timerSeconds]);
+    if (!seasonId) return;
+    syncClock();
+    const id = setInterval(syncClock, 3000);
+    return () => clearInterval(id);
+  }, [seasonId, syncClock, currentPick?.overall_pick]);
 
-  // Countdown
+  const setClock = async (action: "pause" | "resume" | "reset") => {
+    if (!seasonId || !canControlClock) return;
+    setBusy(true);
+    try {
+      await fetch("/api/draft/clock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ season_id: seasonId, action }),
+      });
+      await syncClock();
+    } catch {
+      // Ignore — the next poll will reconcile.
+    }
+    setBusy(false);
+  };
+
+  // Reset timer when pick changes (local fallback only)
+  useEffect(() => {
+    if (clockSynced) return;
+    setTimeLeft(timerSeconds);
+  }, [currentPick?.overall_pick, timerSeconds, clockSynced]);
+
+  // Countdown.
+  //
+  // Advisory only: this runs per browser, starts when that browser saw the
+  // pick change, and nothing happens at zero — there is no server deadline and
+  // no auto-pick. Two people watching will see different numbers. It is a
+  // pacing aid, not an enforced clock.
   useEffect(() => {
     if (isPaused || !currentPick) return;
 
     intervalRef.current = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) return 0;
-        return prev - 1;
-      });
+      // Once synced, count down to the server's deadline rather than
+      // decrementing locally — that way a slow tab can't drift.
+      if (deadlineRef.current !== null) {
+        setTimeLeft(Math.max(0, Math.round((deadlineRef.current - Date.now()) / 1000)));
+        return;
+      }
+      setTimeLeft((prev) => (prev <= 1 ? 0 : prev - 1));
     }, 1000);
 
     return () => {
@@ -152,17 +216,30 @@ export function DraftControls({
             </div>
           )}
 
-          {/* Controls */}
+          {/* Controls — the clock is shared, so only the commissioner moves it */}
           <div className="flex flex-col gap-1.5">
-            <button
-              onClick={() => setIsPaused(!isPaused)}
-              className="btn-secondary text-xs px-3 py-1.5"
-            >
-              {isPaused ? "▶ Resume" : "⏸ Pause"}
-            </button>
-            {isMyTurn && (
-              <button className="btn-primary text-xs px-3 py-1.5">
-                Auto Pick
+            {canControlClock ? (
+              <button
+                onClick={() => setClock(isPaused ? "resume" : "pause")}
+                disabled={busy}
+                className={`btn-secondary text-xs px-3 py-1.5 ${busy ? "opacity-50" : ""}`}
+              >
+                {busy ? "..." : isPaused ? "▶ Resume" : "⏸ Pause"}
+              </button>
+            ) : (
+              isPaused && (
+                <span className="text-xs font-bold text-warning px-3 py-1.5 bg-warning/10 rounded-lg">
+                  ⏸ Paused
+                </span>
+              )
+            )}
+            {canControlClock && (
+              <button
+                onClick={() => setClock("reset")}
+                disabled={busy}
+                className="text-[10px] text-muted hover:text-accent"
+              >
+                reset clock
               </button>
             )}
           </div>

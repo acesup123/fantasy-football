@@ -10,6 +10,10 @@ interface PlayerPoolProps {
   onPick: (playerId: number) => void;
   /** null when nobody is signed in — no lockout to apply. */
   requirements?: RequirementState | null;
+  /** espn_id → ESPN draft rank, lower is better. Empty until ranks load. */
+  ranks?: Record<string, { rank: number; adp: number | null }>;
+  /** Set when the commissioner is picking on another owner's behalf. */
+  pickingFor?: string | null;
 }
 
 const POSITIONS = ["ALL", "QB", "RB", "WR", "TE", "DEF"] as const;
@@ -36,20 +40,41 @@ export function PlayerPool({
   isMyTurn,
   onPick,
   requirements,
+  ranks,
+  pickingFor,
 }: PlayerPoolProps) {
   const [search, setSearch] = useState("");
   const [posFilter, setPosFilter] = useState<string>("ALL");
+  const [byeFilter, setByeFilter] = useState<string>("ALL");
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
 
   // Positions the roster minimums force this pick onto. Empty when there's slack.
   const forcedPositions = requirements?.requiredNow ?? [];
   const isLocked = isMyTurn && forcedPositions.length > 0;
 
+  const rankOf = (p: Player) =>
+    (p.espn_id && ranks?.[p.espn_id]?.rank) || Number.MAX_SAFE_INTEGER;
+
+  // Bye weeks present in the pool, so the filter only offers real options.
+  const byeWeeks = useMemo(
+    () =>
+      Array.from(new Set(players.map((p) => p.bye_week).filter(Boolean) as number[]))
+        .sort((a, b) => a - b),
+    [players]
+  );
+
   const filtered = useMemo(() => {
     let result = players;
 
     if (posFilter !== "ALL") {
       result = result.filter((p) => p.position === posFilter);
+    }
+
+    if (byeFilter !== "ALL") {
+      result =
+        byeFilter === "NONE"
+          ? result.filter((p) => !p.bye_week)
+          : result.filter((p) => String(p.bye_week) === byeFilter);
     }
 
     if (search.trim()) {
@@ -61,8 +86,15 @@ export function PlayerPool({
       );
     }
 
-    return result;
-  }, [players, posFilter, search]);
+    // Best available first. Unranked players sort to the bottom alphabetically
+    // rather than disappearing, so nobody is undraftable if ranks fail to load.
+    return [...result].sort((a, b) => {
+      const ra = rankOf(a);
+      const rb = rankOf(b);
+      if (ra !== rb) return ra - rb;
+      return a.name.localeCompare(b.name);
+    });
+  }, [players, posFilter, byeFilter, search, ranks]);
 
   const handlePick = (playerId: number) => {
     const player = players.find((p) => p.id === playerId);
@@ -85,11 +117,22 @@ export function PlayerPool({
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-xs uppercase tracking-widest text-foreground/70">
             Player Pool
+            <span className="ml-2 normal-case tracking-normal font-normal text-[10px] text-muted">
+              {ranks && Object.keys(ranks).length > 0 ? "best available" : "A-Z (ranks unavailable)"}
+            </span>
           </h3>
           <span className="text-[10px] text-muted font-mono">
             {filtered.length} available
           </span>
         </div>
+
+        {pickingFor && (
+          <div className="bg-warning/10 border border-warning/30 rounded-md px-2 py-1">
+            <span className="text-[10px] font-bold text-warning">
+              Commissioner — picking for {pickingFor}
+            </span>
+          </div>
+        )}
 
         {/* Search */}
         <div className="relative">
@@ -108,6 +151,30 @@ export function PlayerPool({
           >
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
+        </div>
+
+        {/* Bye week filter */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-muted uppercase tracking-wide">Bye</span>
+          <select
+            value={byeFilter}
+            onChange={(e) => setByeFilter(e.target.value)}
+            className="flex-1 px-2 py-1 bg-background border border-border rounded-md text-[10px] focus:outline-none focus:border-accent"
+          >
+            <option value="ALL">Any bye week</option>
+            {byeWeeks.map((w) => (
+              <option key={w} value={String(w)}>Week {w}</option>
+            ))}
+            <option value="NONE">No bye listed</option>
+          </select>
+          {byeFilter !== "ALL" && (
+            <button
+              onClick={() => setByeFilter("ALL")}
+              className="text-[10px] text-muted hover:text-accent"
+            >
+              clear
+            </button>
+          )}
         </div>
 
         {/* Position filters */}
@@ -180,6 +247,11 @@ export function PlayerPool({
                     : undefined
                 }
               >
+                {/* ESPN rank */}
+                <span className="text-[10px] font-mono text-muted/60 w-7 text-right flex-shrink-0">
+                  {rankOf(player) === Number.MAX_SAFE_INTEGER ? "—" : rankOf(player)}
+                </span>
+
                 {/* Position badge */}
                 <span
                   className={`text-[9px] font-black px-1.5 py-0.5 rounded flex-shrink-0 ${
