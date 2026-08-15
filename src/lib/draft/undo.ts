@@ -36,35 +36,41 @@ export type UndoResolution<T> =
   | { ok: false; error: string };
 
 /** A live pick is one an owner actually made: filled, and not a keeper slot. */
-function isLive(pick: UndoCandidate): boolean {
+export function isLivePick(pick: Pick<DraftPick, 'player_id' | 'is_keeper'>): boolean {
   return pick.player_id !== null && !pick.is_keeper;
 }
 
 /**
- * The most recently made live pick, or null if none have been made.
- *
- * Sorted by picked_at descending, falling back to overall_pick for rows with
- * no timestamp (picks written before picked_at was recorded) so the ordering
- * is still total.
+ * Newest-first ordering for picks: picked_at descending, falling back to
+ * overall_pick for rows with no timestamp (picks written before picked_at
+ * was recorded) so the ordering is still total.
  */
+export function mostRecentFirst(
+  a: Pick<DraftPick, 'picked_at' | 'overall_pick'>,
+  b: Pick<DraftPick, 'picked_at' | 'overall_pick'>
+): number {
+  const ta = a.picked_at ? Date.parse(a.picked_at) : NaN;
+  const tb = b.picked_at ? Date.parse(b.picked_at) : NaN;
+
+  // Both timestamped: newest wins. Otherwise fall back to board position,
+  // which is the order picks were made in when nothing has been undone.
+  if (!Number.isNaN(ta) && !Number.isNaN(tb)) {
+    if (ta !== tb) return tb - ta;
+    return b.overall_pick - a.overall_pick;
+  }
+  if (!Number.isNaN(ta)) return -1;
+  if (!Number.isNaN(tb)) return 1;
+  return b.overall_pick - a.overall_pick;
+}
+
+/** The most recently made live pick, or null if none have been made. */
 export function findLastLivePick<T extends UndoCandidate>(picks: T[]): T | null {
-  const live = picks.filter(isLive);
+  const live = picks.filter(isLivePick);
   if (live.length === 0) return null;
 
-  return live.reduce((latest, pick) => {
-    const a = pick.picked_at ? Date.parse(pick.picked_at) : NaN;
-    const b = latest.picked_at ? Date.parse(latest.picked_at) : NaN;
-
-    // Both timestamped: newest wins. Otherwise fall back to board position,
-    // which is the order picks were made in when nothing has been undone.
-    if (!Number.isNaN(a) && !Number.isNaN(b)) {
-      if (a !== b) return a > b ? pick : latest;
-      return pick.overall_pick > latest.overall_pick ? pick : latest;
-    }
-    if (!Number.isNaN(a)) return pick;
-    if (!Number.isNaN(b)) return latest;
-    return pick.overall_pick > latest.overall_pick ? pick : latest;
-  });
+  return live.reduce((latest, pick) =>
+    mostRecentFirst(pick, latest) < 0 ? pick : latest
+  );
 }
 
 /**

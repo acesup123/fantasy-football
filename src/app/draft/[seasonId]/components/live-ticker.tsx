@@ -1,6 +1,7 @@
 "use client";
 
 import type { DraftPick, Owner, Player } from "@/types/database";
+import { isLivePick, mostRecentFirst } from "@/lib/draft/undo";
 
 interface LiveTickerProps {
   picks: DraftPick[];
@@ -17,10 +18,13 @@ const POS_DOT: Record<string, string> = {
 };
 
 export function LiveTicker({ picks, ownerMap, playerMap }: LiveTickerProps) {
-  // Get the last 8 completed picks, most recent first
+  // The last 8 picks owners actually made, newest first. Keeper slots are
+  // pre-filled at initialization, so they're excluded — and ordering is by
+  // when the pick happened, not board position, which diverge once an
+  // undone slot is re-picked.
   const recentPicks = picks
-    .filter((p) => p.player_id !== null)
-    .sort((a, b) => b.overall_pick - a.overall_pick)
+    .filter(isLivePick)
+    .sort(mostRecentFirst)
     .slice(0, 8);
 
   return (
@@ -78,7 +82,6 @@ export function LiveTicker({ picks, ownerMap, playerMap }: LiveTickerProps) {
                   <div className="text-[9px] text-muted/60 mt-0.5 truncate">
                     {owner?.team_name ?? "Unknown"}
                     {player.nfl_team && ` · ${player.nfl_team}`}
-                    {pick.is_keeper && ` · K${pick.keeper_year}`}
                   </div>
                 </div>
 
