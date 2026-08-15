@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
+import { requireActingOwner } from '@/lib/api-auth';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -20,6 +21,11 @@ export async function POST(request: Request) {
   if (!season_year || !owner_id || !keepers) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
   }
+
+  // This deletes the owner's existing keepers before re-inserting, so acting as
+  // someone else would destroy their elections.
+  const auth = await requireActingOwner(owner_id);
+  if (!auth.ok) return auth.response;
 
   if (keepers.length > 5) {
     return NextResponse.json({ error: 'Maximum 5 keepers allowed' }, { status: 400 });

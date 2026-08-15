@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { generateSnakeOrder } from "@/lib/draft/snake-order";
+import { requireCommissioner } from "@/lib/api-auth";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -18,6 +19,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Initializing wipes and regenerates every draft pick for the season.
+    const auth = await requireCommissioner();
+    if (!auth.ok) return auth.response;
 
     // 1. Fetch the season
     const { data: season, error: seasonErr } = await supabase
