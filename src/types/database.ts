@@ -12,6 +12,15 @@ export interface Owner {
   created_at: string;
 }
 
+/** UI theme choice. 'system' follows the OS via prefers-color-scheme. */
+export type Theme = 'dark' | 'light' | 'system';
+
+export interface OwnerPreferences {
+  owner_id: string;
+  theme: Theme;
+  updated_at: string;
+}
+
 export interface Season {
   id: number;
   year: number;
