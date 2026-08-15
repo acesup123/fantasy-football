@@ -95,10 +95,13 @@ export function EspnProfileModal({
   }, [onClose]);
 
   // Portal to body — pick cells animate with transforms, which would trap a
-  // fixed-position overlay inside the cell.
+  // fixed-position overlay inside the cell. Position comes via inline style:
+  // globals.css sets `body > * { position: relative; z-index: 1 }` unlayered,
+  // which beats Tailwind's layered `fixed`/`z-50` utilities on portaled nodes.
   return createPortal(
     <div
-      className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      className="bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+      style={{ position: "fixed", inset: 0, zIndex: 50 }}
       onClick={onClose}
     >
       <div
