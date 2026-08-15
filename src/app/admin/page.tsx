@@ -6,6 +6,54 @@ export default function AdminPage() {
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
 
+  // Draft reset is destructive, so it always previews first and needs a second
+  // click to go through.
+  const [resetPreview, setResetPreview] = useState<{
+    live_picks_that_would_be_lost: number;
+    keeper_slots: number;
+    total_slots: number;
+    season?: { year: number; draft_status: string };
+  } | null>(null);
+  const [resetStatus, setResetStatus] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
+
+  const SEASON_ID = 17; // 2026
+
+  const previewReset = async () => {
+    setResetStatus(null);
+    setResetting(true);
+    try {
+      const resp = await fetch(`/api/draft/reset?season_id=${SEASON_ID}`);
+      const data = await resp.json();
+      if (!resp.ok) setResetStatus(data.error ?? "Could not read draft state");
+      else setResetPreview(data);
+    } catch {
+      setResetStatus("Failed to reach the server");
+    }
+    setResetting(false);
+  };
+
+  const confirmReset = async () => {
+    setResetting(true);
+    try {
+      const resp = await fetch("/api/draft/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ season_id: SEASON_ID, mode: "picks", confirm: true }),
+      });
+      const data = await resp.json();
+      setResetStatus(
+        resp.ok
+          ? `Reset complete — ${data.picks_cleared} pick(s) cleared, ${data.keeper_slots_kept} keepers kept, now on pick ${data.on_the_clock}.`
+          : data.error ?? "Reset failed"
+      );
+      setResetPreview(null);
+    } catch {
+      setResetStatus("Failed to reach the server");
+    }
+    setResetting(false);
+  };
+
   const runSync = async () => {
     setSyncing(true);
     setSyncStatus("Syncing...");
@@ -44,6 +92,68 @@ export default function AdminPage() {
           <span className="text-3xl">🎰</span>
         </div>
       </a>
+
+      {/* Draft reset — destructive, commissioner only */}
+      <div className="bg-card border border-danger/30 rounded-xl p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="font-bold text-sm text-danger">Reset Draft Board</h2>
+            <p className="text-xs text-muted mt-0.5">
+              Clears every pick made and puts the board back to the start. Keepers,
+              draft order and traded picks are kept. This cannot be undone.
+            </p>
+            {resetStatus && (
+              <p className="text-xs mt-2 text-accent">{resetStatus}</p>
+            )}
+          </div>
+          {!resetPreview && (
+            <button
+              onClick={previewReset}
+              disabled={resetting}
+              className={`text-xs px-4 py-2 rounded border border-danger/40 text-danger hover:bg-danger/10 transition-colors flex-shrink-0 ${
+                resetting ? "opacity-50" : ""
+              }`}
+            >
+              {resetting ? "Checking..." : "Reset Draft"}
+            </button>
+          )}
+        </div>
+
+        {resetPreview && (
+          <div className="mt-4 bg-danger/5 border border-danger/30 rounded-lg p-4">
+            <p className="text-xs font-bold text-danger mb-2">
+              This will erase {resetPreview.live_picks_that_would_be_lost} pick
+              {resetPreview.live_picks_that_would_be_lost === 1 ? "" : "s"}.
+            </p>
+            <ul className="text-[11px] text-muted space-y-0.5 mb-3">
+              <li>{resetPreview.keeper_slots} keeper slots kept</li>
+              <li>{resetPreview.total_slots} total slots on the board</li>
+              <li>The clock restarts on the first pick</li>
+            </ul>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={confirmReset}
+                disabled={resetting}
+                className={`text-xs px-4 py-2 rounded bg-danger text-white font-semibold hover:opacity-90 ${
+                  resetting ? "opacity-50" : ""
+                }`}
+              >
+                {resetting
+                  ? "Resetting..."
+                  : `Yes, erase ${resetPreview.live_picks_that_would_be_lost} pick${
+                      resetPreview.live_picks_that_would_be_lost === 1 ? "" : "s"
+                    }`}
+              </button>
+              <button
+                onClick={() => setResetPreview(null)}
+                className="text-xs px-4 py-2 rounded border border-border hover:bg-card-hover"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* ESPN Sync */}
       <div className="bg-card border border-border rounded-xl p-5">
