@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Navigation } from "@/components/layout/navigation";
 import { AuthProvider } from "@/components/auth/auth-provider";
+import { ThemeProvider } from "@/components/theme/theme-provider";
+import { ThemeScript } from "@/components/theme/theme-script";
 import { PlayerModalProvider } from "@/components/player-modal-provider";
 import "./globals.css";
 
@@ -26,19 +28,26 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    // suppressHydrationWarning: ThemeScript sets data-theme on <html> before
+    // React hydrates, so the client tree never matches the server's bare markup.
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <ThemeScript />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <AuthProvider>
-          <PlayerModalProvider>
-            <div className="min-h-screen flex flex-col">
-              <Navigation />
-              <main className="flex-1 p-4 md:p-6 max-w-[1600px] mx-auto w-full">
-                {children}
-              </main>
-            </div>
-          </PlayerModalProvider>
+          <ThemeProvider>
+            <PlayerModalProvider>
+              <div className="min-h-screen flex flex-col">
+                <Navigation />
+                <main className="flex-1 p-4 md:p-6 max-w-[1600px] mx-auto w-full">
+                  {children}
+                </main>
+              </div>
+            </PlayerModalProvider>
+          </ThemeProvider>
         </AuthProvider>
       </body>
     </html>

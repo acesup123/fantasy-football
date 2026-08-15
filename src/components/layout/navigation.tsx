@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/auth/auth-provider";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
 
 const NAV_ITEMS = [
   { href: "/", label: "Home" },
@@ -96,6 +97,8 @@ export function Navigation() {
 
         {/* Right side: user info + admin toggle */}
         <div className="flex items-center gap-2 flex-shrink-0">
+          <ThemeToggle />
+
           {/* Admin mode toggle */}
           {isAdmin && (
             <button
