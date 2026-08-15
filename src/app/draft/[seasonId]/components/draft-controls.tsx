@@ -27,7 +27,12 @@ export function DraftControls({
     setTimeLeft(timerSeconds);
   }, [currentPick?.overall_pick, timerSeconds]);
 
-  // Countdown
+  // Countdown.
+  //
+  // Advisory only: this runs per browser, starts when that browser saw the
+  // pick change, and nothing happens at zero — there is no server deadline and
+  // no auto-pick. Two people watching will see different numbers. It is a
+  // pacing aid, not an enforced clock.
   useEffect(() => {
     if (isPaused || !currentPick) return;
 

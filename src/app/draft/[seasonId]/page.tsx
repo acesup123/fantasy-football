@@ -267,10 +267,30 @@ export default function DraftPage() {
   const nextPick = picks.find((p) => p.overall_pick === currentPickNumber + 1);
   const isMyTurn = currentPick?.current_owner_id === currentOwnerId;
 
+
   const draftedPlayerIds = useMemo(
     () => new Set(picks.filter((p) => p.player_id !== null).map((p) => p.player_id)),
     [picks]
   );
+  // ESPN draft ranks so the pool can be ordered by value. Kept out of the
+  // players table because they shift through the preseason; the pool falls
+  // back to alphabetical if this fails, so a draft is never blocked on it.
+  const [ranks, setRanks] = useState<Record<string, { rank: number; adp: number | null }>>({});
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await fetch(`/api/players/ranks?season=${new Date().getFullYear()}`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!cancelled && data?.ranks) setRanks(data.ranks);
+      } catch {
+        // Leave ranks empty — the pool stays alphabetical.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const availablePlayers = useMemo(
     () => players.filter((p) => !draftedPlayerIds.has(p.id)),
     [players, draftedPlayerIds]
@@ -285,10 +305,19 @@ export default function DraftPage() {
     [players]
   );
 
+  // The API already lets a commissioner act for another owner (canActAs), and
+  // they routinely enter picks for absent owners. Surface that on the board.
+  const isCommissioner = Boolean(authOwner?.is_commissioner);
+  const canPickNow = isMyTurn || isCommissioner;
+  const pickingForName =
+    !isMyTurn && isCommissioner && currentPick
+      ? ownerMap.get(currentPick.current_owner_id)?.name ?? "another owner"
+      : null;
+
   // ---- Make a pick (POST to API) ----
   const makePick = useCallback(
     async (playerId: number) => {
-      if (!isMyTurn || !currentPick || !season) return;
+      if (!canPickNow || !currentPick || !season) return;
       setPickError(null);
 
       try {
@@ -299,7 +328,9 @@ export default function DraftPage() {
             season_id: season.id,
             overall_pick: currentPickNumber,
             player_id: playerId,
-            owner_id: currentOwnerId,
+            // The owner whose pick this is — a commissioner may be entering
+            // it on their behalf. requireActingOwner authorises that.
+            owner_id: currentPick.current_owner_id,
           }),
         });
 
@@ -335,7 +366,7 @@ export default function DraftPage() {
         setPickError("Network error — try again");
       }
     },
-    [isMyTurn, currentPick, season, currentPickNumber, currentOwnerId]
+    [canPickNow, currentPick, season, currentPickNumber]
   );
 
   // ---- Use demo data as fallback ----
@@ -426,7 +457,7 @@ export default function DraftPage() {
   const displayPlayerMap = players.length > 0 ? playerMap : new Map(displayPlayers.map((p) => [p.id, p]));
   const displayCurrentPick = currentPick ?? null;
   const displayNextPick = nextPick ?? null;
-  const displayIsMyTurn = season ? isMyTurn : false;
+  const displayIsMyTurn = season ? canPickNow : false;
 
   return (
     <div className="space-y-4 pb-8">
@@ -505,6 +536,8 @@ export default function DraftPage() {
             players={displayAvailable}
             isMyTurn={displayIsMyTurn}
             onPick={makePick}
+            ranks={ranks}
+            pickingFor={pickingForName}
           />
           <LiveTicker
             picks={displayPicks}
