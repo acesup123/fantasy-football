@@ -46,3 +46,6 @@ next-env.d.ts
 *.csv
 !scripts/*.csv
 .claude/worktrees/
+
+# one-off undo data from scripts/cleanup-players.ts
+scripts/.cleanup-backup-*.json

@@ -3,6 +3,10 @@
     {
       "path": "/api/sync?secret=${CRON_SECRET}",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/keepers/sync?secret=${CRON_SECRET}",
+      "schedule": "30 8 * * *"
     }
   ]
 }

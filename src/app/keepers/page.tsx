@@ -18,6 +18,16 @@ interface KeeperPlayer {
   reason?: string;
 }
 
+interface ElectedKeeper {
+  owner_id: string;
+  player_id: number;
+  player_name: string;
+  position: string;
+  keeper_year: number;
+  round_cost: number;
+  source_type: "draft" | "free_agent";
+}
+
 interface OwnerKeepers {
   owner_id: string;
   owner_name: string;
@@ -76,6 +86,7 @@ export default function KeepersPage() {
   const [saving, setSaving] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [availableYears, setAvailableYears] = useState<number[]>([2026, 2025]);
+  const [electedCount, setElectedCount] = useState(0);
 
   const isCurrentSeason = season === 2026;
 
@@ -112,14 +123,74 @@ export default function KeepersPage() {
 
     try {
       if (isCurrentSeason) {
-        // Current season: load eligible keepers for election
-        const resp = await fetch(`/api/keepers/eligible?season=${season}`);
-        const result = await resp.json();
-        setData(result);
+        // Current season: eligible players to choose from, plus whichever
+        // keepers are already on record (synced from ESPN) pre-selected.
+        const [eligibleResp, currentResp] = await Promise.all([
+          fetch(`/api/keepers/eligible?season=${season}`),
+          fetch(`/api/keepers/current?season=${season}`),
+        ]);
+        const result = await eligibleResp.json();
+        const elected = await currentResp.json();
+
+        const electedRows: ElectedKeeper[] = Array.isArray(elected) ? elected : [];
+        setElectedCount(electedRows.length);
+
+        const electedByOwner = new Map<string, ElectedKeeper[]>();
+        for (const k of electedRows) {
+          if (!electedByOwner.has(k.owner_id)) electedByOwner.set(k.owner_id, []);
+          electedByOwner.get(k.owner_id)!.push(k);
+        }
+
+        // The eligible list is derived from last season's draft and lineups, so
+        // it misattributes anyone acquired by trade or waivers afterwards, and
+        // it recomputes its own costs. Synced keepers are authoritative: their
+        // cost overrides, and any the eligible list is missing get appended so
+        // every elected keeper is visible.
+        const merged: OwnerKeepers[] = result.map((owner: OwnerKeepers) => {
+          const mine = electedByOwner.get(owner.owner_id) ?? [];
+          const byPlayerId = new Map(mine.map(k => [k.player_id, k]));
+
+          const players = owner.players.map(p => {
+            const synced = byPlayerId.get(p.player_id);
+            if (!synced) return p;
+            byPlayerId.delete(p.player_id);
+            return {
+              ...p,
+              keeper_year: synced.keeper_year,
+              round_cost: synced.round_cost,
+              source: synced.source_type,
+              years_remaining: Math.max(0, 4 - synced.keeper_year),
+              eligible: true,
+            };
+          });
+
+          for (const missing of byPlayerId.values()) {
+            players.push({
+              player_id: missing.player_id,
+              player_name: missing.player_name,
+              position: missing.position,
+              nfl_team: null,
+              original_round: 0,
+              keeper_year: missing.keeper_year,
+              round_cost: missing.round_cost,
+              years_remaining: Math.max(0, 4 - missing.keeper_year),
+              eligible: true,
+              source: missing.source_type,
+            });
+          }
+
+          players.sort((a, b) => a.round_cost - b.round_cost);
+          return { ...owner, players };
+        });
+
+        setData(merged);
 
         const newSelections = new Map<string, Set<number>>();
-        for (const o of result) {
-          newSelections.set(o.owner_id, new Set());
+        for (const o of merged) {
+          newSelections.set(
+            o.owner_id,
+            new Set((electedByOwner.get(o.owner_id) ?? []).map(k => k.player_id))
+          );
         }
         setSelections(newSelections);
       } else {
@@ -222,7 +293,9 @@ export default function KeepersPage() {
           <h1 className="text-3xl font-bold">Keeper Management</h1>
           <p className="text-muted text-sm">
             {isCurrentSeason
-              ? `Select up to 5 keepers per team for the ${season} season.`
+              ? electedCount > 0
+                ? `${electedCount} keepers on record for ${season}, synced from ESPN.`
+                : `Select up to 5 keepers per team for the ${season} season.`
               : `Viewing keepers used in the ${season} draft.`}
           </p>
         </div>
