@@ -25,6 +25,23 @@ const POS_TEXT: Record<string, string> = {
 // Math.random so a re-render mid-animation doesn't reshuffle the pieces.
 const CONFETTI_COLORS = ["--qb", "--rb", "--wr", "--te", "--def", "--accent"];
 const CONFETTI_COUNT = 28;
+const SHARD_COUNT = 14;
+
+/**
+ * ESPN headshot for the drafted player, or the team logo for a D/ST (their
+ * negative ESPN ids have no headshot). Null when there's nothing to show;
+ * the splash also hides the img on a 404 so a missing photo never shows a
+ * broken-image icon mid-celebration.
+ */
+function playerImageUrl(player: Player): string | null {
+  if (player.espn_id && !player.espn_id.startsWith("-")) {
+    return `https://a.espncdn.com/i/headshots/nfl/players/full/${player.espn_id}.png`;
+  }
+  if (player.position === "DEF" && player.nfl_team) {
+    return `https://a.espncdn.com/i/teamlogos/nfl/500/${player.nfl_team.toLowerCase()}.png`;
+  }
+  return null;
+}
 
 export function PickSplash({ pick, player, teamName, isSteal, onDone }: PickSplashProps) {
   // Auto-dismiss; the CSS fade-out starts just before this fires so the
@@ -35,6 +52,8 @@ export function PickSplash({ pick, player, teamName, isSteal, onDone }: PickSpla
   }, [pick.id, pick.player_id, onDone]);
 
   const posText = POS_TEXT[player.position] ?? "text-foreground";
+  const posVar = `var(--${player.position.toLowerCase()}, var(--accent))`;
+  const imageUrl = playerImageUrl(player);
 
   return (
     <div
@@ -81,6 +100,39 @@ export function PickSplash({ pick, player, teamName, isSteal, onDone }: PickSpla
               selects
             </span>
           </div>
+
+          {imageUrl && (
+            <div className="relative flex justify-center">
+              {/* Explosion behind the headshot: flash, shockwave ring, shards */}
+              <div className="splash-boom" aria-hidden>
+                <div
+                  className="splash-flash"
+                  style={{
+                    background: `radial-gradient(circle, ${posVar} 0%, transparent 70%)`,
+                  }}
+                />
+                <div className="splash-shockwave" style={{ borderColor: posVar }} />
+                {Array.from({ length: SHARD_COUNT }, (_, i) => (
+                  <span
+                    key={i}
+                    className="splash-shard"
+                    style={{
+                      "--a": `${i * (360 / SHARD_COUNT)}deg`,
+                      background: `var(${CONFETTI_COLORS[i % CONFETTI_COLORS.length]})`,
+                    } as React.CSSProperties}
+                  />
+                ))}
+              </div>
+              <img
+                src={imageUrl}
+                alt={player.name}
+                className="splash-photo relative w-40 max-h-32 object-contain drop-shadow-2xl"
+                onError={(e) => {
+                  e.currentTarget.style.display = "none";
+                }}
+              />
+            </div>
+          )}
 
           <div
             className={`pick-splash-name text-4xl sm:text-5xl font-black tracking-tight uppercase leading-none ${posText}`}
