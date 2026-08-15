@@ -5,6 +5,7 @@ import type { DraftPick, Owner, Player } from "@/types/database";
 import { LEAGUE_CONFIG } from "@/types/database";
 import { formatPickLabel } from "@/lib/draft/snake-order";
 import { abbreviateName } from "@/lib/draft/roster-requirements";
+import { espnProfileUrl } from "@/lib/espn/profile-url";
 import { RosterGrid } from "./roster-grid";
 
 interface DraftBoardProps {
@@ -20,12 +21,6 @@ interface DraftBoardProps {
 }
 
 export type BoardView = "board" | "rosters";
-
-/** ESPN player profile URL, or null for DEF (team defenses use negative ESPN ids with no player page). */
-function espnProfileUrl(player: Player): string | null {
-  if (!player.espn_id || player.espn_id.startsWith("-")) return null;
-  return `https://www.espn.com/nfl/player/_/id/${player.espn_id}`;
-}
 
 const POS_CELL_CLASS: Record<string, string> = {
   QB: "pick-cell-qb",
