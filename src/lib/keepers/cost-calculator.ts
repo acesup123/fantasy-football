@@ -83,12 +83,33 @@ export interface KeeperCost {
  */
 export function computeKeeperCost(
   history: DraftHistoryEntry[],
-  targetYear: number
+  targetYear: number,
+  options: {
+    /**
+     * How the owner held the player at the end of last season. Drafted or
+     * traded-for keeps his draft status; dropped and re-added off the wire
+     * resets him to a free agent even if he was drafted earlier that year.
+     */
+    keepsDraftStatus?: boolean;
+  } = {}
 ): KeeperCost {
   const prior = history
     .filter(h => h.year < targetYear)
     .sort((a, b) => a.year - b.year);
   const last = prior[prior.length - 1];
+
+  // Dropped and re-added — draft status is gone.
+  if (options.keepsDraftStatus === false) {
+    return {
+      keeperYear: 1,
+      roundCost: LEAGUE_CONFIG.FREE_AGENT_KEEPER_ROUND,
+      sourceType: 'free_agent',
+      eligible: true,
+      basis: last && last.year === targetYear - 1
+        ? `picked up off waivers after being drafted in round ${last.round} — draft status resets`
+        : 'free agent pickup',
+    };
+  }
 
   // Not drafted last season → free agent pickup.
   if (!last || last.year !== targetYear - 1) {

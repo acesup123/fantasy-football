@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { fetchKeeperElections } from '@/lib/espn/keepers';
+import { fetchFinalRosters, keepsDraftStatus } from '@/lib/espn/rosters';
 import { hasEspnCredentials } from '@/lib/espn/request';
 import { getOwnerForTeam } from '@/lib/espn/config';
 import {
@@ -72,6 +73,11 @@ export async function GET(request: Request) {
     // 1. Elections from ESPN
     // ---------------------------------------------------------------
     const { elections, keeperLimit, deadline, offRoster } = await fetchKeeperElections(year);
+
+    // Last season's final roster decides whether a player keeps his draft
+    // status: drafted or traded-for keeps it, dropped-and-re-added resets him
+    // to a free agent.
+    const priorRosters = await fetchFinalRosters(year - 1);
     log.push(`ESPN returned ${elections.length} keeper elections for ${year} (limit ${keeperLimit}/team)`);
     if (deadline) log.push(`Keeper deadline: ${deadline.toISOString().slice(0, 10)}`);
 
@@ -157,6 +163,7 @@ export async function GET(request: Request) {
       rankSource: string;
       cost: ReturnType<typeof computeKeeperCost>;
       lastRound: number | null;
+      priorAcquisition: string;
     }
 
     const prepared: Prepared[] = [];
@@ -176,7 +183,28 @@ export async function GET(request: Request) {
       }
 
       const history = historyByPlayer.get(player.id) ?? [];
-      const cost = computeKeeperCost(history, year);
+      const priorEntry = priorRosters.byPlayerId.get(election.espnPlayerId);
+      if (!priorEntry) {
+        warnings.push(`${election.playerName} (${ownerName}) was not on any ${year - 1} final roster — treated as a free agent`);
+      }
+      // Picked up off the wire after the trade deadline — not keeper-eligible.
+      if (
+        priorEntry &&
+        !keepsDraftStatus(priorEntry.acquisitionType) &&
+        priorRosters.tradeDeadline !== null &&
+        priorEntry.acquisitionDate !== null &&
+        priorEntry.acquisitionDate > priorRosters.tradeDeadline
+      ) {
+        const when = new Date(priorEntry.acquisitionDate).toISOString().slice(0, 10);
+        const deadline = new Date(priorRosters.tradeDeadline).toISOString().slice(0, 10);
+        warnings.push(
+          `${election.playerName} (${ownerName}) was picked up ${when}, after the ${year - 1} trade deadline of ${deadline} — not keeper-eligible, but elected in ESPN`
+        );
+      }
+
+      const cost = computeKeeperCost(history, year, {
+        keepsDraftStatus: priorEntry ? keepsDraftStatus(priorEntry.acquisitionType) : false,
+      });
 
       if (!cost.eligible) {
         warnings.push(`${election.playerName} (${ownerName}) is not keeper-eligible: ${cost.reason}`);
@@ -192,6 +220,7 @@ export async function GET(request: Request) {
         rankSource: election.rankSource,
         cost,
         lastRound: history.length > 0 ? history[history.length - 1].round : null,
+        priorAcquisition: priorEntry?.acquisitionType ?? 'NOT_ROSTERED',
       });
     }
 
@@ -265,6 +294,7 @@ export async function GET(request: Request) {
           keeper_year: `K${k.cost.keeperYear}`,
           round_cost: r.finalRound,
           source: k.cost.sourceType,
+          acquired: k.priorAcquisition,
           basis: r.bumpedFrom !== undefined
             ? `${k.cost.basis}, bumped to round ${r.finalRound} (round ${r.bumpedFrom} conflict)`
             : k.cost.basis,
