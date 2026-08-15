@@ -714,6 +714,10 @@ export default function DraftPage() {
             "Unknown Team"
           }
           isSteal={splashIsSteal}
+          // League lore: Marcus gets the clown treatment instead of pyro.
+          roast={/marcus/i.test(
+            displayOwnerMap.get(splashPick.current_owner_id)?.name ?? ""
+          )}
           onDone={clearSplash}
         />
       )}

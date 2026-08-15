@@ -10,6 +10,8 @@ interface PickSplashProps {
   teamName: string;
   /** A full round of value or more — earns the stamp. */
   isSteal: boolean;
+  /** League-roast mode: clowns instead of confetti, wobble instead of boom. */
+  roast?: boolean;
   onDone: () => void;
 }
 
@@ -82,7 +84,7 @@ function playerImageUrl(player: Player): string | null {
   return null;
 }
 
-export function PickSplash({ pick, player, teamName, isSteal, onDone }: PickSplashProps) {
+export function PickSplash({ pick, player, teamName, isSteal, roast = false, onDone }: PickSplashProps) {
   // Auto-dismiss; the CSS fade-out starts just before this fires so the
   // unmount lands on an already-invisible overlay.
   useEffect(() => {
@@ -101,28 +103,44 @@ export function PickSplash({ pick, player, teamName, isSteal, onDone }: PickSpla
       role="status"
       aria-live="polite"
     >
-      {/* Confetti rain */}
+      {/* Confetti rain — or clown rain, depending on who's picking */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
-        {Array.from({ length: CONFETTI_COUNT }, (_, i) => (
-          <span
-            key={i}
-            className="confetti-piece"
-            style={{
-              left: `${(i * 37 + 11) % 100}%`,
-              width: `${6 + (i % 3) * 2}px`,
-              height: `${10 + (i % 4) * 3}px`,
-              background: `var(${CONFETTI_COLORS[i % CONFETTI_COLORS.length]})`,
-              animationDelay: `${(i % 7) * 110}ms`,
-              animationDuration: `${2100 + (i % 5) * 320}ms`,
-            }}
-          />
-        ))}
+        {Array.from({ length: CONFETTI_COUNT }, (_, i) =>
+          roast ? (
+            <span
+              key={i}
+              className="clown-piece"
+              style={{
+                left: `${(i * 37 + 11) % 100}%`,
+                fontSize: `${18 + (i % 3) * 8}px`,
+                animationDelay: `${(i % 7) * 110}ms`,
+                animationDuration: `${2400 + (i % 5) * 320}ms`,
+              }}
+            >
+              🤡
+            </span>
+          ) : (
+            <span
+              key={i}
+              className="confetti-piece"
+              style={{
+                left: `${(i * 37 + 11) % 100}%`,
+                width: `${6 + (i % 3) * 2}px`,
+                height: `${10 + (i % 4) * 3}px`,
+                background: `var(${CONFETTI_COLORS[i % CONFETTI_COLORS.length]})`,
+                animationDelay: `${(i % 7) * 110}ms`,
+                animationDuration: `${2100 + (i % 5) * 320}ms`,
+              }}
+            />
+          )
+        )}
       </div>
 
-      {/* Full-screen detonation flash — double pop */}
-      <div className="splash-screenflash" aria-hidden />
+      {/* Full-screen detonation flash — double pop. The roast doesn't rate one. */}
+      {!roast && <div className="splash-screenflash" aria-hidden />}
 
       {/* Fireworks bloom around the card after the main blast */}
+      {!roast && (
       <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
         {FIREWORKS.map((fw, f) => {
           const color = fw.color ?? posVar;
@@ -155,10 +173,13 @@ export function PickSplash({ pick, player, teamName, isSteal, onDone }: PickSpla
           );
         })}
       </div>
+      )}
 
-      {/* Everything inside jolts with the blast — camera shake, not card wobble */}
-      <div className="splash-quake">
+      {/* Everything inside jolts with the blast — camera shake, not card wobble.
+          Roast picks don't quake; they wilt. */}
+      <div className={roast ? "splash-quake splash-quake-still" : "splash-quake"}>
         {/* Viewport-scale blast: shockwaves, aftershock, embers, smoke */}
+        {!roast && (
         <div className="blast-layer" aria-hidden>
           <div className="blast-ring" style={{ borderColor: posVar }} />
           <div className="blast-ring blast-ring-2" style={{ borderColor: posVar }} />
@@ -189,9 +210,14 @@ export function PickSplash({ pick, player, teamName, isSteal, onDone }: PickSpla
             />
           ))}
         </div>
+        )}
 
         {/* Announcement card */}
-        <div className="pick-splash-card relative text-center px-6 py-8 max-w-lg mx-4">
+        <div
+          className={`pick-splash-card ${
+            roast ? "pick-splash-card-sad" : ""
+          } relative text-center px-6 py-8 max-w-lg mx-4`}
+        >
           {/* Position-colored glow behind the name */}
           <div
             className="pick-splash-glow"
@@ -214,6 +240,7 @@ export function PickSplash({ pick, player, teamName, isSteal, onDone }: PickSpla
             {imageUrl && (
               <div className="relative flex justify-center">
                 {/* Fireball and shards detonate behind the headshot */}
+                {!roast && (
                 <div className="splash-boom" aria-hidden>
                   <div
                     className="splash-flash"
@@ -244,6 +271,7 @@ export function PickSplash({ pick, player, teamName, isSteal, onDone }: PickSpla
                     />
                   ))}
                 </div>
+                )}
                 <img
                   src={imageUrl}
                   alt={player.name}
@@ -253,6 +281,7 @@ export function PickSplash({ pick, player, teamName, isSteal, onDone }: PickSpla
                   }}
                 />
                 {/* The player is on fire: glow plus flames licking up the headshot */}
+                {!roast && (
                 <div className="splash-fire" aria-hidden>
                   <div className="splash-fireglow" />
                   {FLAMES.map((f, i) => (
@@ -269,6 +298,7 @@ export function PickSplash({ pick, player, teamName, isSteal, onDone }: PickSpla
                     />
                   ))}
                 </div>
+                )}
               </div>
             )}
 
@@ -286,10 +316,19 @@ export function PickSplash({ pick, player, teamName, isSteal, onDone }: PickSpla
               )}
             </div>
 
-            {isSteal && (
-              <div className="steal-stamp inline-block border-[3px] border-accent text-accent font-black text-xl uppercase tracking-[0.2em] px-4 py-1 rounded-md">
-                Steal
+            {roast ? (
+              <div
+                className="steal-stamp inline-block border-[3px] font-black text-xl uppercase tracking-[0.2em] px-4 py-1 rounded-md"
+                style={{ borderColor: "var(--danger)", color: "var(--danger)" }}
+              >
+                Marcus Special 🤡
               </div>
+            ) : (
+              isSteal && (
+                <div className="steal-stamp inline-block border-[3px] border-accent text-accent font-black text-xl uppercase tracking-[0.2em] px-4 py-1 rounded-md">
+                  Steal
+                </div>
+              )
             )}
           </div>
         </div>

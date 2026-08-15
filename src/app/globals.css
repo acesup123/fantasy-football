@@ -1156,6 +1156,31 @@ body > * {
   animation: confetti-fall linear forwards;
 }
 
+/* Clown rain — same fall, zero dignity */
+.clown-piece {
+  position: absolute;
+  top: -6vh;
+  line-height: 1;
+  animation: confetti-fall linear forwards;
+}
+
+/* Roast mode: no quake, and the card wilts instead of punching */
+.splash-quake-still {
+  animation: none;
+}
+
+.pick-splash-card-sad {
+  animation:
+    splash-card-in 0.55s cubic-bezier(0.34, 1.56, 0.64, 1),
+    splash-sad-wobble 1.7s ease-in-out 0.6s 2;
+}
+
+@keyframes splash-sad-wobble {
+  0%, 100% { transform: rotate(0deg) translateY(0); }
+  25% { transform: rotate(-2.5deg) translateY(5px); }
+  75% { transform: rotate(2.5deg) translateY(5px); }
+}
+
 @keyframes confetti-fall {
   0% { transform: translateY(0) rotate(0deg); opacity: 1; }
   100% { transform: translateY(118vh) rotate(720deg); opacity: 0.5; }
@@ -1163,6 +1188,7 @@ body > * {
 
 @media (prefers-reduced-motion: reduce) {
   .pick-splash .confetti-piece,
+  .pick-splash .clown-piece,
   .pick-splash .splash-boom,
   .pick-splash .blast-layer,
   .pick-splash .splash-screenflash,
