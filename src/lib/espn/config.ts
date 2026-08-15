@@ -66,6 +66,22 @@ export function getOwnerForTeam(teamId: number, year: number): string {
 }
 
 /**
+ * Reverse lookup: which ESPN team an owner runs in a given season.
+ * Used when exporting draft results back toward ESPN.
+ */
+export function getEspnTeamIdForOwner(ownerName: string, year: number): number | null {
+  for (const [teamId, history] of Object.entries(ESPN_TEAM_OWNERS)) {
+    for (const entry of history) {
+      const endYear = entry.to ?? 9999;
+      if (entry.name === ownerName && year >= entry.from && year <= endYear) {
+        return Number(teamId);
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * All unique owners who have ever been in the league.
  */
 export const ALL_OWNERS = [

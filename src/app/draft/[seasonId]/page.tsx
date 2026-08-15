@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { DraftBoard, type BoardView } from "./components/draft-board";
 import { PlayerPool } from "./components/player-pool";
 import { DraftControls } from "./components/draft-controls";
+import { DraftComplete } from "./components/draft-complete";
 import { TradeModal } from "./components/trade-modal";
 import { LiveTicker } from "./components/live-ticker";
 import { PickSplash } from "./components/pick-splash";
@@ -633,18 +634,29 @@ export default function DraftPage() {
         </div>
       </div>
 
-      {/* Draft Controls */}
-      <DraftControls
-        currentPick={displayCurrentPick}
-        isMyTurn={displayIsMyTurn}
-        ownerMap={displayOwnerMap}
-        timerSeconds={displaySeason.pick_timer_seconds}
-        seasonId={season?.id}
-        canControlClock={isCommissioner}
-        onNextPick={displayNextPick}
-        undoTarget={season ? undoTarget : null}
-        onUndo={undoLastPick}
-      />
+      {/* Once the last pick is in, the clock gives way to the wrap-up panel:
+          finalize, download the board, and the ESPN entry sheet. Without this
+          swap the controls would put pick #1 back "on the clock" — the pick
+          pointer resets to null on completion and the fallback is 1. */}
+      {displaySeason.draft_status === "complete" && season ? (
+        <DraftComplete
+          seasonId={season.id}
+          seasonYear={season.year}
+          isCommissioner={isCommissioner}
+        />
+      ) : (
+        <DraftControls
+          currentPick={displayCurrentPick}
+          isMyTurn={displayIsMyTurn}
+          ownerMap={displayOwnerMap}
+          timerSeconds={displaySeason.pick_timer_seconds}
+          seasonId={season?.id}
+          canControlClock={isCommissioner}
+          onNextPick={displayNextPick}
+          undoTarget={season ? undoTarget : null}
+          onUndo={undoLastPick}
+        />
+      )}
 
       {/* Main layout. The board sits beside the pool; the rosters view takes
           the full width — 12 columns of names need every pixel — and drops the
