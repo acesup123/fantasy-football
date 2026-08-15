@@ -5,7 +5,7 @@ import type { DraftPick, Owner, Player } from "@/types/database";
 import { LEAGUE_CONFIG } from "@/types/database";
 import { formatPickLabel } from "@/lib/draft/snake-order";
 import { abbreviateName } from "@/lib/draft/roster-requirements";
-import { espnProfileUrl } from "@/lib/espn/profile-url";
+import { EspnPlayerName } from "@/components/espn-profile-modal";
 import { RosterGrid } from "./roster-grid";
 
 interface DraftBoardProps {
@@ -251,7 +251,6 @@ function PickCell({
   // Filled pick
   const posClass = POS_CELL_CLASS[player.position] ?? "";
   const posText = POS_TEXT[player.position] ?? "text-foreground";
-  const espnUrl = espnProfileUrl(player);
 
   return (
     <div
@@ -266,18 +265,9 @@ function PickCell({
     >
       {/* Player name — abbreviated so it survives a 1/12-width column */}
       <div className="text-[10px] font-semibold truncate leading-tight">
-        {espnUrl ? (
-          <a
-            href={espnUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:underline hover:text-accent"
-          >
-            {abbreviateName(player.name)}
-          </a>
-        ) : (
-          abbreviateName(player.name)
-        )}
+        <EspnPlayerName player={player}>
+          {abbreviateName(player.name)}
+        </EspnPlayerName>
       </div>
 
       {/* Second row: position, team, badges */}

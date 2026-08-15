@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import type { Player } from "@/types/database";
 import type { RequirementState } from "@/lib/draft/roster-requirements";
-import { espnProfileUrl } from "@/lib/espn/profile-url";
+import { EspnPlayerName } from "@/components/espn-profile-modal";
 
 interface PlayerPoolProps {
   players: Player[];
@@ -236,7 +236,6 @@ export function PlayerPool({
           <div className="divide-y divide-border/20">
             {filtered.map((player) => {
               const blocked = isLocked && !forcedPositions.includes(player.position);
-              const espnUrl = espnProfileUrl(player);
               return (
               <div
                 key={player.id}
@@ -266,18 +265,7 @@ export function PlayerPool({
                 {/* Player info */}
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-semibold truncate">
-                    {espnUrl ? (
-                      <a
-                        href={espnUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="hover:underline hover:text-accent"
-                      >
-                        {player.name}
-                      </a>
-                    ) : (
-                      player.name
-                    )}
+                    <EspnPlayerName player={player}>{player.name}</EspnPlayerName>
                   </div>
                   <div className="text-[10px] text-muted">
                     {player.nfl_team ?? "FA"}
