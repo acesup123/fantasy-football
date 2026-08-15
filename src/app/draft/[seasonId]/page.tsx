@@ -7,7 +7,6 @@ import { PlayerPool } from "./components/player-pool";
 import { DraftControls } from "./components/draft-controls";
 import { TradeModal } from "./components/trade-modal";
 import { LiveTicker } from "./components/live-ticker";
-import { PickSplash } from "./components/pick-splash";
 import type { DraftPick, Player, Owner, Season, Trade } from "@/types/database";
 import { LEAGUE_CONFIG } from "@/types/database";
 import { createClient } from "@/lib/supabase/client";
@@ -122,23 +121,8 @@ export default function DraftPage() {
   const [boardView, setBoardView] = useState<BoardView>("board");
   const [recentPickId, setRecentPickId] = useState<number | undefined>(undefined);
   const [pickError, setPickError] = useState<string | null>(null);
-  const [splashPick, setSplashPick] = useState<DraftPick | null>(null);
 
   const subscriptionsRef = useRef<{ unsubscribeAll: () => void } | null>(null);
-  // Your own pick arrives twice — once optimistically, once over realtime —
-  // so splashes are deduped. Keyed on slot + player, not just slot, so an
-  // undone pick that gets re-made with a different player still announces.
-  const announcedRef = useRef<Set<string>>(new Set());
-
-  const announcePick = useCallback((pick: DraftPick) => {
-    if (!pick.player_id || pick.is_keeper) return;
-    const key = `${pick.id}:${pick.player_id}`;
-    if (announcedRef.current.has(key)) return;
-    announcedRef.current.add(key);
-    setSplashPick(pick);
-  }, []);
-
-  const clearSplash = useCallback(() => setSplashPick(null), []);
 
   // ---- Fetch initial data ----
   useEffect(() => {
@@ -250,11 +234,6 @@ export default function DraftPage() {
           setRecentPickId(updatedPick.id);
           setTimeout(() => setRecentPickId(undefined), 2000);
         }
-
-        // Full-screen announcement — everyone sees the celebration, whoever
-        // made the pick. announcePick skips keepers and dedupes the echo of
-        // your own optimistic pick.
-        announcePick(updatedPick);
       },
       onTrade: (trade: Trade) => {
         setPendingTrades((prev) => {
@@ -281,7 +260,7 @@ export default function DraftPage() {
       subs.unsubscribeAll();
       subscriptionsRef.current = null;
     };
-  }, [season?.id, supabase, announcePick]);
+  }, [season?.id, supabase]);
 
   // ---- Derived state ----
   const currentOwnerId = authOwner?.id ?? "";
@@ -392,11 +371,6 @@ export default function DraftPage() {
               : p
           )
         );
-        announcePick({
-          ...currentPick,
-          player_id: playerId,
-          picked_at: new Date().toISOString(),
-        });
         // The server tells us where the pointer landed. Assuming +1 lands on a
         // keeper slot — 60 of the 180 are pre-filled — and stalls the board.
         setSeason((prev) =>
@@ -413,7 +387,7 @@ export default function DraftPage() {
         setPickError("Network error — try again");
       }
     },
-    [canPickNow, currentPick, season, currentPickNumber, announcePick]
+    [canPickNow, currentPick, season, currentPickNumber]
   );
 
   // ---- Undo the last pick (commissioner only) ----
@@ -564,23 +538,6 @@ export default function DraftPage() {
   const displayNextPick = nextPick ?? null;
   const displayIsMyTurn = season ? canPickNow : false;
 
-  // Splash details resolve at render time so the realtime handler doesn't
-  // close over stale player/owner maps. A pick whose player we can't resolve
-  // (roster fetch raced the realtime event) just skips the celebration.
-  const splashPlayer = splashPick?.player_id
-    ? displayPlayerMap.get(splashPick.player_id) ?? null
-    : null;
-  const splashRank =
-    splashPlayer?.espn_id != null ? ranks[splashPlayer.espn_id]?.rank : undefined;
-  // A full round of value below the slot earns the stamp. Rank-vs-pick is too
-  // pessimistic here to call reaches (keepers skew elite and off-board), but
-  // in this direction the keeper bias only makes a steal harder to earn.
-  const splashIsSteal =
-    !!splashPick &&
-    !!splashRank &&
-    splashRank > 0 &&
-    splashPick.overall_pick - splashRank >= LEAGUE_CONFIG.NUM_TEAMS;
-
   return (
     <div className="space-y-4 pb-8">
       {/* Header */}
@@ -698,20 +655,6 @@ export default function DraftPage() {
           />
         </div>
       </div>
-
-      {/* Pick celebration splash */}
-      {splashPick && splashPlayer && (
-        <PickSplash
-          pick={splashPick}
-          player={splashPlayer}
-          teamName={
-            displayOwnerMap.get(splashPick.current_owner_id)?.team_name ??
-            "Unknown Team"
-          }
-          isSteal={splashIsSteal}
-          onDone={clearSplash}
-        />
-      )}
 
       {/* Trade Modal */}
       {showTradeModal && (

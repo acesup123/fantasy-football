@@ -7,6 +7,8 @@ import { formatPickLabel } from "@/lib/draft/snake-order";
 import { abbreviateName } from "@/lib/draft/roster-requirements";
 import { EspnPlayerName } from "@/components/espn-profile-modal";
 import { RosterGrid } from "./roster-grid";
+import { DraftGrades } from "./draft-grades";
+import type { RankEntry } from "@/lib/draft/grade";
 
 interface DraftBoardProps {
   picks: DraftPick[];
@@ -15,12 +17,15 @@ interface DraftBoardProps {
   currentPickNumber: number;
   recentPickId?: number; // ID of the most recently made pick (for animation)
   currentOwnerId?: string;
-  /** Controlled by the page — the rosters view takes the full width. */
+  /** Controlled by the page — the rosters and grades views take the full width. */
   view: BoardView;
   onViewChange: (view: BoardView) => void;
+  ranks?: Record<string, RankEntry>;
+  /** Grades only unlock on a finished draft — a half-built roster grades as junk. */
+  isDraftComplete?: boolean;
 }
 
-export type BoardView = "board" | "rosters";
+export type BoardView = "board" | "rosters" | "grades";
 
 const POS_CELL_CLASS: Record<string, string> = {
   QB: "pick-cell-qb",
@@ -47,6 +52,8 @@ export function DraftBoard({
   currentOwnerId,
   view,
   onViewChange,
+  ranks,
+  isDraftComplete = false,
 }: DraftBoardProps) {
   const grid = useMemo(() => {
     const g: (DraftPick | null)[][] = Array.from(
@@ -83,7 +90,11 @@ export function DraftBoard({
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-2 h-2 rounded-full bg-accent animate-pulse flex-shrink-0" />
           <span className="text-xs font-bold uppercase tracking-widest text-accent truncate">
-            {view === "board" ? "Live Draft Board" : "Rosters by Position"}
+            {view === "board"
+              ? "Live Draft Board"
+              : view === "rosters"
+                ? "Rosters by Position"
+                : "Draft Grades"}
           </span>
         </div>
 
@@ -94,24 +105,43 @@ export function DraftBoard({
 
           {/* View toggle */}
           <div className="flex rounded-md bg-background/60 p-0.5">
-            {(["board", "rosters"] as const).map((v) => (
-              <button
-                key={v}
-                onClick={() => onViewChange(v)}
-                className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide transition-all ${
-                  view === v
-                    ? "bg-accent text-background"
-                    : "text-muted hover:text-foreground"
-                }`}
-              >
-                {v === "board" ? "Board" : "Rosters"}
-              </button>
-            ))}
+            {(["board", "rosters", "grades"] as const).map((v) => {
+              // Grading a draft in progress reads as a verdict on a roster that
+              // isn't built yet, so the tab stays disabled until it's done.
+              const locked = v === "grades" && !isDraftComplete;
+              return (
+                <button
+                  key={v}
+                  onClick={() => !locked && onViewChange(v)}
+                  disabled={locked}
+                  title={
+                    locked ? "Grades unlock when the draft is complete" : undefined
+                  }
+                  className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide transition-all ${
+                    view === v
+                      ? "bg-accent text-background"
+                      : locked
+                        ? "text-muted/40 cursor-not-allowed"
+                        : "text-muted hover:text-foreground"
+                  }`}
+                >
+                  {v === "board" ? "Board" : v === "rosters" ? "Rosters" : "Grades"}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
 
-      {view === "rosters" ? (
+      {view === "grades" ? (
+        <DraftGrades
+          picks={picks}
+          owners={owners}
+          playerMap={playerMap}
+          ranks={ranks}
+          currentOwnerId={currentOwnerId}
+        />
+      ) : view === "rosters" ? (
         <div className="p-2">
           <RosterGrid
             picks={picks}
