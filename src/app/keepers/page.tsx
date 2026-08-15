@@ -83,8 +83,6 @@ export default function KeepersPage() {
   const [historicalKeepers, setHistoricalKeepers] = useState<HistoricalKeeper[]>([]);
   const [loading, setLoading] = useState(true);
   const [selections, setSelections] = useState<Map<string, Set<number>>>(new Map());
-  const [saving, setSaving] = useState<string | null>(null);
-  const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [availableYears, setAvailableYears] = useState<number[]>([2026, 2025]);
   const [electedCount, setElectedCount] = useState(0);
 
@@ -97,9 +95,6 @@ export default function KeepersPage() {
     : owner
     ? data.filter((d) => d.owner_id === owner.id)
     : [];
-
-  const canEdit = (ownerId: string) =>
-    isCurrentSeason && (canEditAll || (owner?.id === ownerId));
 
   // Load available years on mount
   useEffect(() => {
@@ -209,58 +204,6 @@ export default function KeepersPage() {
     loadKeepers();
   }, [loadKeepers]);
 
-  const toggleKeeper = (ownerId: string, playerId: number) => {
-    setSelections((prev) => {
-      const next = new Map(prev);
-      const ownerSet = new Set(next.get(ownerId) ?? []);
-      if (ownerSet.has(playerId)) {
-        ownerSet.delete(playerId);
-      } else if (ownerSet.size < 5) {
-        ownerSet.add(playerId);
-      }
-      next.set(ownerId, ownerSet);
-      return next;
-    });
-  };
-
-  const saveKeepers = async (ownerId: string) => {
-    const ownerData = data.find((d) => d.owner_id === ownerId);
-    if (!ownerData) return;
-
-    const selected = selections.get(ownerId) ?? new Set();
-    const keeperPayload = ownerData.players
-      .filter((p) => selected.has(p.player_id))
-      .map((p) => ({
-        player_id: p.player_id,
-        keeper_year: p.keeper_year,
-        round_cost: p.round_cost,
-        source_type: p.source,
-      }));
-
-    setSaving(ownerId);
-    try {
-      const resp = await fetch("/api/keepers/elect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          season_year: season,
-          owner_id: ownerId,
-          keepers: keeperPayload,
-        }),
-      });
-      const result = await resp.json();
-      if (result.success) {
-        setSavedMessage(`${ownerData.owner_name}: ${keeperPayload.length} keepers saved`);
-        setTimeout(() => setSavedMessage(null), 3000);
-      } else {
-        setSavedMessage(`Error: ${result.error}`);
-      }
-    } catch (err) {
-      setSavedMessage("Failed to save");
-    }
-    setSaving(null);
-  };
-
   if (loading || authLoading) {
     return (
       <div className="space-y-6">
@@ -294,17 +237,12 @@ export default function KeepersPage() {
           <p className="text-muted text-sm">
             {isCurrentSeason
               ? electedCount > 0
-                ? `${electedCount} keepers on record for ${season}, synced from ESPN.`
-                : `Select up to 5 keepers per team for the ${season} season.`
+                ? `${electedCount} keepers set in ESPN for ${season}. Read-only here — change them in ESPN.`
+                : `No keepers set in ESPN for ${season} yet.`
               : `Viewing keepers used in the ${season} draft.`}
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {savedMessage && (
-            <span className="text-xs text-accent font-medium fade-in">
-              {savedMessage}
-            </span>
-          )}
           <select
             value={season}
             onChange={(e) => setSeason(parseInt(e.target.value))}
@@ -323,10 +261,12 @@ export default function KeepersPage() {
       <div className="bg-card border border-border rounded-xl p-4 space-y-3">
         <div className="flex items-center gap-6 text-xs text-muted flex-wrap">
           <span>Max <span className="text-foreground font-bold">5</span> keepers</span>
-          <span>Cost escalates +1 round/year</span>
+          <span>K1 costs last year&apos;s draft spot</span>
+          <span>K2+ escalates 1 round/year</span>
           <span>Round 1 always costs Round 1</span>
           <span>Free agents = Round 10</span>
-          <span>Post-deadline FA pickups ineligible</span>
+          <span>Dropped &amp; re-added resets to free agent</span>
+          <span>Post-deadline pickups ineligible</span>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-[10px] text-muted font-semibold">Urgency:</span>
@@ -363,7 +303,7 @@ export default function KeepersPage() {
           </span>
           {isAdmin && (
             <span className="text-[10px] text-muted">
-              Toggle Admin mode in the nav to edit all teams
+              Toggle Admin mode in the nav to see all teams
             </span>
           )}
         </div>
@@ -372,7 +312,7 @@ export default function KeepersPage() {
       {canEditAll && (
         <div className="bg-warning/5 border border-warning/20 rounded-xl p-3">
           <span className="text-xs text-warning font-semibold">
-            Admin Mode — Editing all {visibleData.length} teams
+            Admin Mode — Showing all {visibleData.length} teams
           </span>
         </div>
       )}
@@ -381,16 +321,18 @@ export default function KeepersPage() {
       <div className={`grid grid-cols-1 ${canEditAll ? "lg:grid-cols-2" : "lg:grid-cols-1 max-w-2xl"} gap-4`}>
         {visibleData.map((ownerData) => {
           const selected = selections.get(ownerData.owner_id) ?? new Set();
-          const eligible = ownerData.players.filter((p) => p.eligible);
-          const ineligible = ownerData.players.filter((p) => !p.eligible);
-          const editable = canEdit(ownerData.owner_id);
+          const kept = ownerData.players.filter((p) => selected.has(p.player_id));
+          const notKept = ownerData.players.filter(
+            (p) => !selected.has(p.player_id) && p.eligible
+          );
+          const ineligible = ownerData.players.filter(
+            (p) => !selected.has(p.player_id) && !p.eligible
+          );
 
           return (
             <div
               key={ownerData.owner_id}
-              className={`bg-card border rounded-xl overflow-hidden ${
-                editable ? "border-border" : "border-border/50"
-              }`}
+              className="bg-card border border-border rounded-xl overflow-hidden"
             >
               {/* Owner header */}
               <div className="px-4 py-3 border-b border-border bg-card-elevated/30 flex items-center justify-between">
@@ -400,70 +342,33 @@ export default function KeepersPage() {
                     {ownerData.team_name} — {ownerData.players.length} players
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted">
-                    <span className={`font-bold ${selected.size >= 5 ? "text-danger" : "text-accent"}`}>
-                      {selected.size}
-                    </span>
-                    /5 keepers
+                <span className="text-xs text-muted">
+                  <span className={`font-bold ${selected.size === 5 ? "text-accent" : "text-warning"}`}>
+                    {selected.size}
                   </span>
-                  {editable && (
-                    <button
-                      onClick={() => saveKeepers(ownerData.owner_id)}
-                      disabled={saving === ownerData.owner_id}
-                      className={`btn-primary text-[10px] px-3 py-1 ${
-                        saving === ownerData.owner_id ? "opacity-50" : ""
-                      }`}
-                    >
-                      {saving === ownerData.owner_id ? "Saving..." : "Save"}
-                    </button>
-                  )}
-                </div>
+                  /5 kept
+                </span>
               </div>
 
               {/* Eligible players */}
               <div className="divide-y divide-border/20">
-                {eligible.length === 0 && (
+                {kept.length === 0 && (
                   <div className="p-4 text-center text-muted text-xs">
-                    No keeper-eligible players found
+                    No keepers set in ESPN for this team
                   </div>
                 )}
-                {eligible.map((player) => {
-                  const isSelected = selected.has(player.player_id);
-                  const canSelect = isSelected || selected.size < 5;
-
+                {kept.map((player) => {
                   return (
                     <div
                       key={player.player_id}
-                      className={`flex items-center gap-3 px-4 py-2 transition-colors ${
-                        !editable
-                          ? ""
-                          : isSelected
-                          ? "bg-accent/10 cursor-pointer"
-                          : canSelect
-                          ? "hover:bg-card-hover/50 cursor-pointer"
-                          : "opacity-40"
-                      }`}
-                      onClick={() => editable && canSelect && toggleKeeper(ownerData.owner_id, player.player_id)}
+                      className="flex items-center gap-3 px-4 py-2 bg-accent/10"
                     >
-                      {/* Checkbox — only shown when editable */}
-                      {editable ? (
-                        <div
-                          className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
-                            isSelected
-                              ? "bg-accent border-accent"
-                              : "border-border"
-                          }`}
-                        >
-                          {isSelected && (
-                            <svg className="w-2.5 h-2.5 text-background" viewBox="0 0 20 20" fill="currentColor">
-                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                            </svg>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="w-4" />
-                      )}
+                      {/* Kept marker */}
+                      <div className="w-4 h-4 rounded bg-accent flex items-center justify-center flex-shrink-0">
+                        <svg className="w-2.5 h-2.5 text-background" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                        </svg>
+                      </div>
 
                       {/* Position badge */}
                       <span
@@ -507,6 +412,44 @@ export default function KeepersPage() {
                     </div>
                   );
                 })}
+
+                {/* The rest of the roster — what each would have cost */}
+                {notKept.length > 0 && (
+                  <>
+                    <div className="px-4 py-1.5 bg-background/30 border-t border-border/30">
+                      <span className="text-[10px] font-bold text-muted uppercase tracking-wider">
+                        Not kept ({notKept.length})
+                      </span>
+                    </div>
+                    {notKept.map((player) => (
+                      <div key={player.player_id} className="flex items-center gap-3 px-4 py-2 opacity-60">
+                        <div className="w-4 h-4 rounded border border-border flex-shrink-0" />
+                        <span
+                          className={`text-[9px] font-black px-1.5 py-0.5 rounded flex-shrink-0 ${
+                            POS_BADGE[player.position] ?? ""
+                          }`}
+                        >
+                          {player.position}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs truncate">
+                            <button className="hover:text-accent text-left" onClick={() => openPlayer(player.player_id)}>
+                              {player.player_name}
+                            </button>
+                          </div>
+                          <div className="text-[10px] text-muted">
+                            {player.nfl_team ?? "FA"}
+                            {player.source === "free_agent" && " · Free Agent"}
+                          </div>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <div className="text-[10px] text-muted">would cost</div>
+                          <div className="text-xs font-semibold text-muted">Rd {player.round_cost}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                )}
 
                 {/* Ineligible players — always visible with red strikethrough */}
                 {ineligible.length > 0 && (
