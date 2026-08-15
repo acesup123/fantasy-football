@@ -86,12 +86,29 @@ export interface ScoreBlock<C extends string> {
   components: Record<C, number>;
 }
 
+/**
+ * A grade relative to the rest of the league right now, rather than against a
+ * fixed scale. Mid-draft every absolute score is low — nobody has a full roster
+ * at pick 40 — so an absolute letter reads as "everyone is failing" when what
+ * an owner actually wants to know is "am I ahead of the room".
+ */
+export interface CurvedGrade {
+  /** Standard deviations from the league mean. 0 is exactly average. */
+  z: number;
+  letter: string;
+  rank: number;
+  /** True when the field is too tightly bunched for the spread to mean much. */
+  bunched: boolean;
+}
+
 export interface TeamGrade {
   ownerId: string;
   ownerName: string;
   teamName: string;
   draft: ScoreBlock<DraftComponent>;
   roster: ScoreBlock<RosterComponent>;
+  /** Live, league-relative letters — the ones to show during the draft. */
+  curve: { draft: CurvedGrade; roster: CurvedGrade };
   /** Quarterbacks on the roster, best rank first. */
   qbRoom: Player[];
   starters: { slot: string; player: Player | null }[];
@@ -274,6 +291,58 @@ function scoreDiscipline(graded: GradedPick[]): number {
 
 // --------------------------------------------------------------------- shared
 
+/**
+ * Curve a set of scores against their own mean.
+ *
+ * Deliberately z-based rather than rank-based. A fixed rank ladder ("1st gets
+ * an A+") would manufacture a spread even when all twelve teams are within a
+ * point of each other, which is exactly the state of the board for the first
+ * few rounds. Using standard deviations keeps a bunched field near B and only
+ * hands out an A+ to a genuine outlier.
+ */
+export function curveScores(scores: number[]): CurvedGrade[] {
+  const n = scores.length;
+  if (n === 0) return [];
+
+  const mean = scores.reduce((a, b) => a + b, 0) / n;
+  const variance =
+    scores.reduce((a, b) => a + (b - mean) ** 2, 0) / n;
+  const stdev = Math.sqrt(variance);
+
+  // Ranks by score, best first. Ties share the better rank.
+  const order = scores
+    .map((s, i) => ({ s, i }))
+    .sort((a, b) => b.s - a.s);
+  const rankOfIndex = new Map<number, number>();
+  order.forEach((e, i) => rankOfIndex.set(e.i, i + 1));
+
+  // Below this the field is effectively tied and a curve is noise.
+  const bunched = stdev < 1;
+
+  return scores.map((s, i) => {
+    const z = bunched ? 0 : (s - mean) / stdev;
+    return {
+      z: Math.round(z * 100) / 100,
+      letter: bunched ? 'B−' : letterForZ(z),
+      rank: rankOfIndex.get(i) as number,
+      bunched,
+    };
+  });
+}
+
+function letterForZ(z: number): string {
+  if (z >= 1.5) return 'A+';
+  if (z >= 1.0) return 'A';
+  if (z >= 0.6) return 'A−';
+  if (z >= 0.3) return 'B+';
+  if (z >= -0.15) return 'B';
+  if (z >= -0.4) return 'B−';
+  if (z >= -0.8) return 'C+';
+  if (z >= -1.2) return 'C';
+  if (z >= -1.6) return 'C−';
+  return 'D';
+}
+
 function letterFor(score: number): string {
   if (score >= 90) return 'A+';
   if (score >= 85) return 'A';
@@ -436,7 +505,9 @@ export function gradeDraft({
 
   const passedOverByPick = computePassedOver(picks, playerMap, ranks);
 
-  type Draft = Omit<TeamGrade, 'draft' | 'roster'> & {
+  // Ranks and the curve both need the whole field, so they're filled in after
+  // every team is built.
+  type Draft = Omit<TeamGrade, 'draft' | 'roster' | 'curve'> & {
     draft: Omit<ScoreBlock<DraftComponent>, 'rank'>;
     roster: Omit<ScoreBlock<RosterComponent>, 'rank'>;
   };
@@ -562,11 +633,17 @@ export function gradeDraft({
   const draftRank = new Map(draftOrder.map((g, i) => [g.ownerId, i + 1]));
   const rosterRank = new Map(rosterOrder.map((g, i) => [g.ownerId, i + 1]));
 
+  // Curved against this league at this moment, so the letters stay meaningful
+  // while the draft is still running and every absolute score is low.
+  const draftCurve = curveScores(built.map((g) => g.draft.score));
+  const rosterCurve = curveScores(built.map((g) => g.roster.score));
+
   return built
-    .map((g) => ({
+    .map((g, i) => ({
       ...g,
       draft: { ...g.draft, rank: draftRank.get(g.ownerId) as number },
       roster: { ...g.roster, rank: rosterRank.get(g.ownerId) as number },
+      curve: { draft: draftCurve[i], roster: rosterCurve[i] },
     }))
     .sort((a, b) => a.roster.rank - b.roster.rank);
 }

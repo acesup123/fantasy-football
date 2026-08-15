@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   gradeDraft,
   pickStarters,
+  curveScores,
   DRAFT_WEIGHTS,
   ROSTER_WEIGHTS,
   type RankEntry,
@@ -470,6 +471,79 @@ describe('gradeDraft — the two grades measure different things', () => {
     expect(g.draftVerdict.length).toBeGreaterThan(0);
     expect(g.rosterVerdict.length).toBeGreaterThan(0);
     expect(g.draftVerdict).not.toBe(g.rosterVerdict);
+  });
+});
+
+describe('curveScores — live grades during the draft', () => {
+  it('centres an average team at B', () => {
+    const curved = curveScores([50, 60, 70, 80, 90]);
+    const middle = curved[2];
+    expect(middle.letter).toBe('B');
+    expect(Math.abs(middle.z)).toBeLessThan(0.15);
+  });
+
+  it('gives the outlier the top letter and the laggard the bottom', () => {
+    const curved = curveScores([20, 60, 62, 64, 66]);
+    const worst = curved[0];
+    expect(worst.rank).toBe(5);
+    expect(worst.letter).toBe('D');
+    expect(curved[4].rank).toBe(1);
+    expect(curved[4].z).toBeGreaterThan(0);
+  });
+
+  it('refuses to manufacture a spread when the field is tied', () => {
+    // The state of the board for the first couple of rounds: everyone level.
+    const curved = curveScores([60, 60, 60, 60]);
+    expect(curved.every((c) => c.bunched)).toBe(true);
+    expect(curved.every((c) => c.letter === 'B−')).toBe(true);
+    expect(curved.every((c) => c.z === 0)).toBe(true);
+  });
+
+  it('treats a near-tied field as bunched rather than ranking noise', () => {
+    const curved = curveScores([60, 60.2, 60.4, 60.1]);
+    expect(curved.every((c) => c.bunched)).toBe(true);
+  });
+
+  it('still ranks every team even when bunched', () => {
+    const curved = curveScores([60, 60.4, 60.2, 60.1]);
+    expect([...curved.map((c) => c.rank)].sort()).toEqual([1, 2, 3, 4]);
+    expect(curved[1].rank).toBe(1);
+  });
+
+  it('handles an empty and a single-team field', () => {
+    expect(curveScores([])).toEqual([]);
+    const one = curveScores([70]);
+    expect(one).toHaveLength(1);
+    expect(one[0].rank).toBe(1);
+    expect(one[0].bunched).toBe(true);
+  });
+
+  it('attaches a curve to every team from gradeDraft', () => {
+    const a = buildTeam('a', BALANCED, 1);
+    const b = buildTeam(
+      'b',
+      BALANCED.map((s) =>
+        s.name === 'QB B' ? { ...s, name: 'WR F', pos: 'WR' as const } : s
+      ),
+      2
+    );
+
+    const grades = gradeDraft({
+      picks: [...a.picks, ...b.picks],
+      owners: [owner('a'), owner('b')],
+      playerMap: new Map([...a.players, ...b.players].map((p) => [p.id, p])),
+      ranks: { ...a.ranks, ...b.ranks },
+    });
+
+    for (const g of grades) {
+      expect(g.curve.roster.letter).toBeTruthy();
+      expect(g.curve.draft.letter).toBeTruthy();
+      expect(g.curve.roster.rank).toBeGreaterThanOrEqual(1);
+    }
+    // The two-QB team must curve above the one-QB team on roster.
+    const strong = grades.find((g) => g.ownerId === 'a')!;
+    const weak = grades.find((g) => g.ownerId === 'b')!;
+    expect(strong.curve.roster.rank).toBeLessThan(weak.curve.roster.rank);
   });
 });
 

@@ -148,6 +148,7 @@ export function DraftBoard({
             owners={owners}
             playerMap={playerMap}
             currentOwnerId={currentOwnerId}
+            ranks={ranks}
           />
         </div>
       ) : (

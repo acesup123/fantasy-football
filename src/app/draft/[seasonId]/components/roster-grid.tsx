@@ -9,12 +9,55 @@ import {
   POSITION_ORDER,
   type OwnerRoster,
 } from "@/lib/draft/roster-requirements";
+import { gradeDraft, type CurvedGrade, type RankEntry } from "@/lib/draft/grade";
 
 interface RosterGridProps {
   picks: DraftPick[];
   owners: Owner[];
   playerMap: Map<number, Player>;
   currentOwnerId?: string;
+  ranks?: Record<string, RankEntry>;
+}
+
+function curveLetterClass(letter: string): string {
+  if (letter.startsWith("A")) return "text-grade-a";
+  if (letter.startsWith("B")) return "text-grade-b";
+  if (letter.startsWith("C")) return "text-grade-c";
+  return "text-grade-d";
+}
+
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+/** One live, curved letter. Roster is the headline; draft rides alongside it. */
+function CurveBadge({
+  label,
+  grade,
+  tooltip,
+  muted = false,
+}: {
+  label: string;
+  grade: CurvedGrade;
+  tooltip: string;
+  muted?: boolean;
+}) {
+  return (
+    <span className="flex flex-col leading-none" title={tooltip}>
+      <span className="text-[7px] uppercase tracking-wider text-muted/70">
+        {label}
+      </span>
+      <span
+        className={`font-black tracking-tight ${
+          muted ? "text-[11px] opacity-70" : "text-[15px]"
+        } ${curveLetterClass(grade.letter)}`}
+      >
+        {grade.letter}
+      </span>
+    </span>
+  );
 }
 
 const POS_TEXT: Record<string, string> = {
@@ -43,11 +86,35 @@ export function RosterGrid({
   owners,
   playerMap,
   currentOwnerId,
+  ranks,
 }: RosterGridProps) {
   const rosters = useMemo(
     () => buildOwnerRosters(picks, playerMap),
     [picks, playerMap]
   );
+
+  // Live grades, curved against the rest of the league right now. Recomputed on
+  // every pick, which is why they're keyed off `picks` and nothing else.
+  const curves = useMemo(() => {
+    const graded = gradeDraft({ picks, owners, playerMap, ranks: ranks ?? {} });
+    return new Map(
+      graded.map((g) => [
+        g.ownerId,
+        { curve: g.curve, livePicks: g.draft.components, keeperCount: g.keeperCount },
+      ])
+    );
+  }, [picks, owners, playerMap, ranks]);
+
+  // How many live picks each team has made — the curve compares teams that
+  // aren't always level, and at the turn that gap is a full pick.
+  const livePickCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of picks) {
+      if (p.player_id === null || p.is_keeper) continue;
+      counts.set(p.current_owner_id, (counts.get(p.current_owner_id) ?? 0) + 1);
+    }
+    return counts;
+  }, [picks]);
 
   // Keep the board's left-to-right team order rather than alphabetical.
   const orderedOwners = useMemo(() => {
@@ -68,16 +135,30 @@ export function RosterGrid({
     return ordered;
   }, [owners, picks]);
 
+  const anyGraded = curves.size > 0;
+
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 xl:grid-cols-12 gap-1.5">
-      {orderedOwners.map((owner) => (
-        <RosterColumn
-          key={owner.id}
-          owner={owner}
-          roster={rosters.get(owner.id)}
-          isMe={owner.id === currentOwnerId}
-        />
-      ))}
+    <div className="space-y-2">
+      {anyGraded && (
+        <p className="text-[10px] text-muted leading-snug">
+          Grades are live and graded on a curve against the rest of the league
+          right now — <span className="text-foreground">B</span> is the field
+          average, not a failing absolute score. They move with every pick.
+        </p>
+      )}
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 xl:grid-cols-12 gap-1.5">
+        {orderedOwners.map((owner) => (
+          <RosterColumn
+            key={owner.id}
+            owner={owner}
+            roster={rosters.get(owner.id)}
+            isMe={owner.id === currentOwnerId}
+            curve={curves.get(owner.id)?.curve}
+            livePicks={livePickCounts.get(owner.id) ?? 0}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -86,10 +167,14 @@ function RosterColumn({
   owner,
   roster,
   isMe,
+  curve,
+  livePicks,
 }: {
   owner: Owner;
   roster: OwnerRoster | undefined;
   isMe: boolean;
+  curve?: { draft: CurvedGrade; roster: CurvedGrade };
+  livePicks: number;
 }) {
   const needs = roster ? POSITION_ORDER.filter((p) => roster.requirements.deficits[p]) : [];
   const forced = roster ? roster.requirements.requiredNow.length > 0 : false;
@@ -106,12 +191,41 @@ function RosterColumn({
         isMe ? "border-accent/50 bg-accent/5" : "border-border bg-background/20"
       }`}
     >
-      {/* Team header */}
+      {/* Team header — live grades sit here, updating on every pick */}
       <div className="px-1.5 py-1 border-b border-border/60 bg-card-elevated/40">
         <div className="text-[10px] font-bold truncate leading-tight" title={owner.team_name}>
           {owner.team_name}
         </div>
-        <div className="text-[9px] text-muted font-mono">{roster?.filled ?? 0} drafted</div>
+
+        {curve ? (
+          <div className="flex items-end justify-between gap-1 mt-0.5">
+            <CurveBadge
+              label="Roster"
+              grade={curve.roster}
+              tooltip={`Roster — what this team owns. ${ordinal(
+                curve.roster.rank
+              )} of the league right now${
+                curve.roster.bunched
+                  ? "; the field is still too close to separate."
+                  : ` (${curve.roster.z > 0 ? "+" : ""}${curve.roster.z}σ).`
+              }`}
+            />
+            <CurveBadge
+              label="Draft"
+              grade={curve.draft}
+              muted
+              tooltip={`Draft — how well this team has picked from the board it faced. ${ordinal(
+                curve.draft.rank
+              )} of the league over ${livePicks} pick${
+                livePicks === 1 ? "" : "s"
+              }.`}
+            />
+          </div>
+        ) : (
+          <div className="text-[9px] text-muted font-mono">
+            {roster?.filled ?? 0} drafted
+          </div>
+        )}
       </div>
 
       {/* Outstanding minimums */}
