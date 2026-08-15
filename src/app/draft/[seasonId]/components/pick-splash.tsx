@@ -21,15 +21,15 @@ const POS_TEXT: Record<string, string> = {
   DEF: "text-def",
 };
 
-// Confetti in the position palette plus accent. Index math instead of
-// Math.random so a re-render mid-animation doesn't reshuffle the pieces.
+// Everything below is index math instead of Math.random so a re-render
+// mid-animation doesn't reshuffle the scene.
 const CONFETTI_COLORS = ["--qb", "--rb", "--wr", "--te", "--def", "--accent"];
 const CONFETTI_COUNT = 44;
 const SHARD_COUNT = 22;
 const SHARD_COUNT_2 = 16;
 
-// Debris that flies out of the blast and falls under gravity. Golden-angle
-// scatter so it looks organic while staying deterministic across renders.
+// Debris blown out of the blast that falls under gravity. Golden-angle
+// scatter so it looks organic while staying deterministic.
 const EMBERS = Array.from({ length: 20 }, (_, i) => {
   const angle = (i * 137.5 * Math.PI) / 180;
   const dist = 120 + (i % 5) * 45;
@@ -41,6 +41,30 @@ const EMBERS = Array.from({ length: 20 }, (_, i) => {
     delay: (i % 4) * 60,
   };
 });
+
+// Flames that lick up over the bottom of the headshot once the blast lands.
+const FLAMES = Array.from({ length: 10 }, (_, i) => ({
+  left: -63 + i * 14,
+  width: 14 + (i % 4) * 5,
+  height: 26 + (i % 3) * 12,
+  duration: 850 + (i % 3) * 180,
+  delay: (i % 5) * 120,
+}));
+
+// Fireworks: a rocket streaks up, then a spark shower blooms where it dies.
+// One golden, one in the position color, one ice-white — staggered so the
+// sky keeps popping after the main blast.
+const FW_SPARKS = Array.from({ length: 16 }, (_, i) => {
+  const a = (i * 22.5 * Math.PI) / 180;
+  const d = 62 + (i % 3) * 24;
+  return { dx: Math.round(Math.cos(a) * d), dy: Math.round(Math.sin(a) * d) };
+});
+
+const FIREWORKS: { x: string; y: string; rise: string; delay: number; color: string | null }[] = [
+  { x: "18%", y: "30%", rise: "70vh", delay: 900, color: "#ffd76a" },
+  { x: "80%", y: "24%", rise: "76vh", delay: 1300, color: null }, // position color
+  { x: "50%", y: "14%", rise: "86vh", delay: 1700, color: "#bfe9ff" },
+];
 
 /**
  * ESPN headshot for the drafted player, or the team logo for a D/ST (their
@@ -62,7 +86,7 @@ export function PickSplash({ pick, player, teamName, isSteal, onDone }: PickSpla
   // Auto-dismiss; the CSS fade-out starts just before this fires so the
   // unmount lands on an already-invisible overlay.
   useEffect(() => {
-    const t = setTimeout(onDone, 3400);
+    const t = setTimeout(onDone, 4300);
     return () => clearTimeout(t);
   }, [pick.id, pick.player_id, onDone]);
 
@@ -95,8 +119,42 @@ export function PickSplash({ pick, player, teamName, isSteal, onDone }: PickSpla
         ))}
       </div>
 
-      {/* Full-screen detonation flash */}
+      {/* Full-screen detonation flash — double pop */}
       <div className="splash-screenflash" aria-hidden />
+
+      {/* Fireworks bloom around the card after the main blast */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
+        {FIREWORKS.map((fw, f) => {
+          const color = fw.color ?? posVar;
+          return (
+            <div key={f}>
+              <span
+                className="fw-rocket"
+                style={{
+                  left: fw.x,
+                  "--rise": fw.rise,
+                  background: `linear-gradient(to top, transparent, ${color})`,
+                  animationDelay: `${fw.delay - 450}ms`,
+                } as React.CSSProperties}
+              />
+              <div className="fw-burst" style={{ left: fw.x, top: fw.y }}>
+                {FW_SPARKS.map((s, i) => (
+                  <span
+                    key={i}
+                    className="fw-spark"
+                    style={{
+                      "--dx": `${s.dx}px`,
+                      "--dy": `${s.dy}px`,
+                      background: i % 3 === 0 ? "#ffffff" : color,
+                      animationDelay: `${fw.delay + (i % 4) * 40}ms`,
+                    } as React.CSSProperties}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
       {/* Everything inside jolts with the blast — camera shake, not card wobble */}
       <div className="splash-quake">
@@ -194,6 +252,23 @@ export function PickSplash({ pick, player, teamName, isSteal, onDone }: PickSpla
                     e.currentTarget.style.display = "none";
                   }}
                 />
+                {/* The player is on fire: glow plus flames licking up the headshot */}
+                <div className="splash-fire" aria-hidden>
+                  <div className="splash-fireglow" />
+                  {FLAMES.map((f, i) => (
+                    <span
+                      key={i}
+                      className="splash-flame"
+                      style={{
+                        left: `calc(50% + ${f.left}px)`,
+                        width: `${f.width}px`,
+                        height: `${f.height}px`,
+                        "--fd": `${f.duration}ms`,
+                        "--fdel": `${500 + f.delay}ms`,
+                      } as React.CSSProperties}
+                    />
+                  ))}
+                </div>
               </div>
             )}
 
