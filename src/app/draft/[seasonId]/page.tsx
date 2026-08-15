@@ -609,9 +609,9 @@ export default function DraftPage() {
       {/* minmax(0,1fr) lets the board column shrink so all 12 teams fit. */}
       <div
         className={
-          boardView === "board"
-            ? "flex flex-col xl:grid xl:grid-cols-[minmax(0,1fr)_340px] gap-3"
-            : "space-y-3"
+          boardView === "rosters"
+            ? "space-y-3"
+            : "flex flex-col xl:grid xl:grid-cols-[minmax(0,1fr)_340px] gap-3"
         }
       >
         {/* Below xl the pool comes first. The board is 15 rounds tall, so
@@ -627,17 +627,15 @@ export default function DraftPage() {
             currentOwnerId={currentOwnerId}
             view={boardView}
             onViewChange={setBoardView}
-            ranks={ranks}
-            isDraftComplete={displaySeason.draft_status === "complete"}
           />
         </div>
 
         {/* Player pool + ticker — sidebar on the board, a row under the rosters */}
         <div
           className={`order-1 xl:order-2 ${
-            boardView === "board"
-              ? "space-y-4"
-              : "grid grid-cols-1 xl:grid-cols-2 gap-3"
+            boardView === "rosters"
+              ? "grid grid-cols-1 xl:grid-cols-2 gap-3"
+              : "space-y-4"
           }`}
         >
           <PlayerPool
