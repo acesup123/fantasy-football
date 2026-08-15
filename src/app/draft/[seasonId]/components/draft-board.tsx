@@ -21,6 +21,12 @@ interface DraftBoardProps {
 
 export type BoardView = "board" | "rosters";
 
+/** ESPN player profile URL, or null for DEF (team defenses use negative ESPN ids with no player page). */
+function espnProfileUrl(player: Player): string | null {
+  if (!player.espn_id || player.espn_id.startsWith("-")) return null;
+  return `https://www.espn.com/nfl/player/_/id/${player.espn_id}`;
+}
+
 const POS_CELL_CLASS: Record<string, string> = {
   QB: "pick-cell-qb",
   RB: "pick-cell-rb",
@@ -250,6 +256,7 @@ function PickCell({
   // Filled pick
   const posClass = POS_CELL_CLASS[player.position] ?? "";
   const posText = POS_TEXT[player.position] ?? "text-foreground";
+  const espnUrl = espnProfileUrl(player);
 
   return (
     <div
@@ -264,7 +271,18 @@ function PickCell({
     >
       {/* Player name — abbreviated so it survives a 1/12-width column */}
       <div className="text-[10px] font-semibold truncate leading-tight">
-        {abbreviateName(player.name)}
+        {espnUrl ? (
+          <a
+            href={espnUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:underline hover:text-accent"
+          >
+            {abbreviateName(player.name)}
+          </a>
+        ) : (
+          abbreviateName(player.name)
+        )}
       </div>
 
       {/* Second row: position, team, badges */}
