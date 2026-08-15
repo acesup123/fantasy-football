@@ -42,11 +42,25 @@ export const DRAFT_WEIGHTS = {
   discipline: 25,
 } as const;
 
+/**
+ * Weights follow what actually separates rosters, measured over a real
+ * completed draft rather than assumed.
+ *
+ * Depth falls from 20 to 8. Bench cover — the value of the three best players
+ * not starting — came out at a median of exactly zero across the league: after
+ * fifteen rounds with twelve teams, benches are replacement filler and there is
+ * no signal there to weigh. It keeps a small weight so a genuinely stocked
+ * bench still counts for something.
+ *
+ * Bye resilience rises from 5 to 12, having been the reverse mistake. Measured
+ * as value sidelined in the worst week rather than a headcount it spans 1.2 to
+ * 2.4 — a real two-fold spread that was being squeezed into five points.
+ */
 export const ROSTER_WEIGHTS = {
-  lineup: 45,
+  lineup: 50,
   superflex: 30,
-  depth: 20,
-  byes: 5,
+  depth: 8,
+  byes: 12,
 } as const;
 
 export type DraftComponent = keyof typeof DRAFT_WEIGHTS;
@@ -81,6 +95,21 @@ const LEAGUE_STARTERS: Record<string, number> = {
   TE: 14, // 12 TE slots plus the occasional flex
   DEF: 12,
 };
+
+/**
+ * Bench cover (mean VORP of the three best non-starters) at which depth maxes
+ * out. The best bench in a real completed draft reached 0.14, so this is set
+ * just under it — most teams score zero here, which is the honest answer.
+ */
+const DEPTH_CEILING = 0.12;
+
+/**
+ * Value sidelined in the worst bye week. Roughly one average starter is
+ * unavoidable; losing the equivalent of two and a half is a stacked bye that
+ * costs real weeks. Measured range across the league was 1.2 to 2.4.
+ */
+const BYE_BEST_LOST = 1.0;
+const BYE_WORST_LOST = 2.5;
 
 /** Mean VORP left on the table per pick at which board value scores zero. */
 const VALUE_SHORTFALL_FLOOR = 0.5;
@@ -344,31 +373,81 @@ function scoreSuperflex(
 }
 
 /**
- * Rewards the RB/WR bodies that cover FLEX and bye weeks, and penalizes picks
- * spent on a second DEF or third TE — there is one slot each, so the extras can
- * never enter a lineup.
+ * Bench strength: what the roster can actually put on the field when a starter
+ * is on bye or hurt.
+ *
+ * Counting bodies instead — five RBs and five WRs — scored 16-20 out of 20 for
+ * every team in a completed draft, because after fifteen rounds everybody has
+ * five of each. It spent a fifth of the scale on no signal at all. What
+ * separates benches is whether the next man up is startable or is replacement
+ * filler, so this reads the three best players not already starting.
  */
-function scoreDepth(counts: Record<string, number>): number {
-  const rb = counts.RB ?? 0;
-  const wr = counts.WR ?? 0;
-  const te = counts.TE ?? 0;
-  const def = counts.DEF ?? 0;
+const DEPTH_COVER = 3;
 
-  const rbScore = Math.min(1, rb / 5);
-  const wrScore = Math.min(1, wr / 5);
-  let raw = (rbScore + wrScore) / 2;
+function scoreDepth(
+  roster: { player: Player }[],
+  starters: { slot: string; player: Player | null }[],
+  counts: Record<string, number>,
+  vorp: VorpTable
+): number {
+  const starting = new Set(
+    starters.map((s) => s.player?.id).filter((id): id is number => id != null)
+  );
 
-  const wasted = Math.max(0, te - 2) + Math.max(0, def - 1);
-  raw -= wasted * 0.12;
+  const bench = roster
+    .filter((e) => !starting.has(e.player.id))
+    .map((e) => vorpOf(e.player, vorp))
+    .sort((a, b) => b - a);
 
+  // Always divided by DEPTH_COVER, so a short bench is penalised rather than
+  // flattered by averaging over fewer players.
+  const cover =
+    bench.slice(0, DEPTH_COVER).reduce((a, b) => a + b, 0) / DEPTH_COVER;
+
+  // Roster spots that can never enter a lineup are still dead weight.
+  const wasted =
+    Math.max(0, (counts.TE ?? 0) - 2) + Math.max(0, (counts.DEF ?? 0) - 1);
+
+  const raw = cover / DEPTH_CEILING - wasted * 0.1;
   return round1(Math.max(0, Math.min(1, raw)) * ROSTER_WEIGHTS.depth);
 }
 
-/** Bye resilience. Up to three starters sharing a week is unavoidable; more isn't. */
-function scoreByes(collision: { week: number; count: number } | null): number {
-  if (!collision) return ROSTER_WEIGHTS.byes;
-  const over = Math.max(0, collision.count - 3);
-  return round1(Math.max(0, 1 - over / 4) * ROSTER_WEIGHTS.byes);
+/**
+ * Bye resilience, measured in the value actually sidelined in the worst week
+ * rather than a headcount.
+ *
+ * Counting starters scored 3.8-5 out of 5 for every team, and treated losing a
+ * top quarterback the same as losing a defence. Weighting each idle starter by
+ * what he is worth separates a bad week from an inconvenient one.
+ */
+function scoreByes(
+  starters: { slot: string; player: Player | null }[],
+  vorp: VorpTable
+): { score: number; worst: { week: number; count: number; lost: number } | null } {
+  const byWeek = new Map<number, { count: number; lost: number }>();
+
+  for (const s of starters) {
+    const week = s.player?.bye_week;
+    if (!week) continue;
+    const entry = byWeek.get(week) ?? { count: 0, lost: 0 };
+    entry.count += 1;
+    entry.lost += vorpOf(s.player, vorp);
+    byWeek.set(week, entry);
+  }
+
+  let worst: { week: number; count: number; lost: number } | null = null;
+  for (const [week, e] of byWeek) {
+    if (!worst || e.lost > worst.lost) worst = { week, ...e };
+  }
+
+  if (!worst) return { score: ROSTER_WEIGHTS.byes, worst: null };
+
+  const raw =
+    (BYE_WORST_LOST - worst.lost) / (BYE_WORST_LOST - BYE_BEST_LOST);
+  return {
+    score: round1(Math.max(0, Math.min(1, raw)) * ROSTER_WEIGHTS.byes),
+    worst,
+  };
 }
 
 // ----------------------------------------------------------------- draft side
@@ -485,14 +564,16 @@ function letterForZ(z: number): string {
  * completed draft the field ran 44 to 73. Grading that against a 0-100 ladder
  * put every single team on a C or a D, which tells an owner nothing. The two
  * grades sit at different natural centres, so each gets its own ladder: an
- * exactly-average roster works out near 55 and an average draft near 70, and
- * both are pinned at B−, the middle of the scale.
+ * exactly-average roster works out near 45 and an average draft near 70, and
+ * both are pinned at B−, the middle of the scale. The roster anchor moved from
+ * 55 to 45 when depth and bye weights were rebalanced onto the components that
+ * actually separate teams; it tracks the measured centre and nothing else.
  *
  * These are fixed constants, not a curve. A genuinely great roster still earns
  * an A+ in a year when the rest of the league is weak, and a bad one still
  * earns a D in a strong year.
  */
-const ROSTER_AVERAGE = 55;
+const ROSTER_AVERAGE = 45;
 const DRAFT_AVERAGE = 70;
 const TIER = 4.5;
 
@@ -743,22 +824,17 @@ export function gradeDraft({
     const starters = pickStarters(roster);
     const qbs = roster.filter((e) => e.player.position === 'QB');
 
-    // Bye collisions among starters only — bench byes cost nothing.
-    const byeCounts = new Map<number, number>();
-    for (const s of starters) {
-      if (!s.player?.bye_week) continue;
-      byeCounts.set(s.player.bye_week, (byeCounts.get(s.player.bye_week) ?? 0) + 1);
-    }
-    let byeCollision: { week: number; count: number } | null = null;
-    for (const [week, count] of byeCounts) {
-      if (!byeCollision || count > byeCollision.count) byeCollision = { week, count };
-    }
+    // Bye exposure among starters only — bench byes cost nothing.
+    const byes = scoreByes(starters, vorp);
+    const byeCollision = byes.worst
+      ? { week: byes.worst.week, count: byes.worst.count }
+      : null;
 
     const rosterComponents: Record<RosterComponent, number> = {
       lineup: scoreLineup(starters, vorp, ceilings.lineup),
       superflex: scoreSuperflex(qbs, vorp, ceilings.superflex),
-      depth: scoreDepth(counts),
-      byes: scoreByes(byeCollision),
+      depth: scoreDepth(roster, starters, counts, vorp),
+      byes: byes.score,
     };
 
     const draftComponents: Record<DraftComponent, number> = {

@@ -285,10 +285,14 @@ describe('gradeDraft — byes, construction and keepers', () => {
     const spread = gradeOf(BALANCED.map((s, i) => ({ ...s, bye: 5 + (i % 8) })));
     const stacked = gradeOf(BALANCED.map((s) => ({ ...s, bye: 9 })));
 
-    // Byes are a roster-side component: full marks when spread, docked when stacked.
+    // Byes are scored on the value sidelined in the worst week, not a
+    // headcount, so a spread roster still concedes something — it just concedes
+    // far less than one that stacks its starters on a single week.
     expect(stacked.roster.components.byes).toBeLessThan(spread.roster.components.byes);
     expect(stacked.byeCollision?.count).toBeGreaterThanOrEqual(4);
-    expect(spread.roster.components.byes).toBe(ROSTER_WEIGHTS.byes);
+    expect(spread.roster.components.byes).toBeGreaterThan(
+      ROSTER_WEIGHTS.byes / 2
+    );
   });
 
   it('penalizes a wasted second DEF — only one can ever start', () => {
@@ -541,6 +545,65 @@ describe('gradeDraft — the two grades measure different things', () => {
   });
 });
 
+describe('gradeDraft — depth and byes measure value, not headcount', () => {
+  function gradeOf(spec: typeof BALANCED) {
+    const { picks, players, ranks } = buildTeam('a', spec);
+    return gradeDraft({
+      picks,
+      owners: [owner('a')],
+      ...withPool(players, ranks),
+    })[0];
+  }
+
+  it('separates a bench of startable players from a bench of filler', () => {
+    // Same nine starters; only the bench differs.
+    const filler = gradeOf(
+      BALANCED.map((s) =>
+        ['RB E', 'WR E', 'TE B'].includes(s.name) ? { ...s, rank: 400 } : s
+      )
+    );
+    const stocked = gradeOf(
+      BALANCED.map((s) =>
+        ['RB E', 'WR E', 'TE B'].includes(s.name) ? { ...s, rank: 40 } : s
+      )
+    );
+
+    expect(stocked.roster.components.depth).toBeGreaterThan(
+      filler.roster.components.depth
+    );
+  });
+
+  it('weighs a bye by who is idle, not how many', () => {
+    // Byes otherwise all distinct, so the only collision is the one under test.
+    const spread = BALANCED.map((s, i) => ({ ...s, bye: 3 + i }));
+    const collideOn = (names: string[]) =>
+      gradeOf(spread.map((s) => (names.includes(s.name) ? { ...s, bye: 9 } : s)));
+
+    const cheapBye = collideOn(['RB E', 'WR E', 'TE B']);
+    const costlyBye = collideOn(['QB A', 'RB A', 'WR A']);
+
+    // Same number of players idle; one roster sidelines its best three.
+    expect(costlyBye.roster.components.byes).toBeLessThan(
+      cheapBye.roster.components.byes
+    );
+  });
+
+  it('keeps depth from dominating — it is the smallest weight for a reason', () => {
+    // Bench cover measured a median of exactly zero across a real league, so
+    // depth must never outweigh the components that actually separate teams.
+    expect(ROSTER_WEIGHTS.depth).toBeLessThan(ROSTER_WEIGHTS.byes);
+    expect(ROSTER_WEIGHTS.depth).toBeLessThan(ROSTER_WEIGHTS.superflex);
+    expect(ROSTER_WEIGHTS.lineup + ROSTER_WEIGHTS.superflex).toBeGreaterThan(70);
+  });
+
+  it('still sums to 100 on both grades', () => {
+    const sum = (o: Record<string, number>) =>
+      Object.values(o).reduce((a, b) => a + b, 0);
+    expect(sum(ROSTER_WEIGHTS)).toBe(100);
+    expect(sum(DRAFT_WEIGHTS)).toBe(100);
+  });
+});
+
 describe('curveScores — live grades during the draft', () => {
   it('centres an average team at B', () => {
     const curved = curveScores([50, 60, 70, 80, 90]);
@@ -692,9 +755,13 @@ describe('gradeDraft — degraded inputs', () => {
     expect(grades).toHaveLength(1);
     expect(Number.isFinite(grades[0].roster.score)).toBe(true);
     expect(Number.isFinite(grades[0].draft.score)).toBe(true);
-    // Everyone is replacement level, so lineup and value collapse — but the
-    // roster-shape components still register.
-    expect(grades[0].roster.components.depth).toBeGreaterThan(0);
+    // Every component is value-based now, so with no ranks at all the ones that
+    // measure player value correctly collapse to zero rather than inventing a
+    // score. Byes still reads full marks, because nothing of value is lost when
+    // nothing has value.
+    expect(grades[0].roster.components.lineup).toBe(0);
+    expect(grades[0].roster.components.depth).toBe(0);
+    expect(grades[0].roster.components.byes).toBe(ROSTER_WEIGHTS.byes);
   });
 
   it('ignores unfilled pick slots', () => {
