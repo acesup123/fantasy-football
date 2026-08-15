@@ -800,7 +800,9 @@ body > * {
 }
 
 .pick-splash-card {
-  animation: splash-card-in 0.55s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation:
+    splash-card-in 0.55s cubic-bezier(0.34, 1.56, 0.64, 1),
+    splash-shake 0.4s linear 0.3s;
 }
 
 @keyframes splash-card-in {
@@ -856,52 +858,65 @@ body > * {
   pointer-events: none;
 }
 
+/* The blast waits for the card to land (~0.25s) — detonating during the
+   card's own scale-in meant it was mostly spent before anything was visible. */
 .splash-flash {
   position: absolute;
-  width: 220px;
-  height: 220px;
+  width: 280px;
+  height: 280px;
   border-radius: 50%;
-  animation: splash-flash 0.5s ease-out forwards;
+  animation: splash-flash 0.7s ease-out 0.25s both;
 }
 
 @keyframes splash-flash {
   0% { opacity: 0; transform: scale(0.2); }
-  15% { opacity: 0.9; transform: scale(1); }
-  100% { opacity: 0; transform: scale(1.7); }
+  20% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.9); }
 }
 
 .splash-shockwave {
   position: absolute;
-  width: 90px;
-  height: 90px;
+  width: 100px;
+  height: 100px;
   border-radius: 50%;
-  border: 5px solid;
-  animation: splash-shockwave 0.65s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  border: 6px solid;
+  animation: splash-shockwave 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.25s both;
 }
 
 @keyframes splash-shockwave {
-  0% { transform: scale(0.2); opacity: 1; }
-  100% { transform: scale(3.4); opacity: 0; border-width: 1px; }
+  0% { transform: scale(0.2); opacity: 0; }
+  12% { opacity: 1; }
+  100% { transform: scale(4); opacity: 0; border-width: 1px; }
 }
 
 /* Each shard flies out along its own --a angle */
 .splash-shard {
   position: absolute;
-  width: 30px;
-  height: 4px;
-  border-radius: 2px;
+  width: 36px;
+  height: 5px;
+  border-radius: 3px;
   transform-origin: center left;
-  animation: splash-shard-fly 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: splash-shard-fly 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.25s both;
 }
 
 @keyframes splash-shard-fly {
-  0% { transform: rotate(var(--a)) translateX(8px); opacity: 1; }
-  100% { transform: rotate(var(--a)) translateX(130px) scaleX(0.3); opacity: 0; }
+  0% { transform: rotate(var(--a)) translateX(8px); opacity: 0; }
+  10% { opacity: 1; }
+  100% { transform: rotate(var(--a)) translateX(170px) scaleX(0.25); opacity: 0; }
 }
 
-/* The headshot lands right after the blast kicks off */
+/* Impact jolt when the blast goes off */
+@keyframes splash-shake {
+  0%, 100% { transform: translate(0, 0); }
+  20% { transform: translate(-3px, 2px); }
+  40% { transform: translate(3px, -2px); }
+  60% { transform: translate(-2px, -1px); }
+  80% { transform: translate(2px, 1px); }
+}
+
+/* The headshot slams in with the blast — its landing IS the impact */
 .splash-photo {
-  animation: splash-photo-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.08s backwards;
+  animation: splash-photo-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) 0.18s backwards;
 }
 
 @keyframes splash-photo-in {
