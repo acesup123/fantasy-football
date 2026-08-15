@@ -699,9 +699,14 @@ export default function DraftPage() {
         </div>
       </div>
 
-      {/* Pick celebration splash */}
+      {/* Pick celebration splash. Keyed per announcement: CSS animations only
+          run once per DOM node and the fade-out pins opacity at 0 with
+          `forwards`, so back-to-back picks (buzzer pick, then an instant
+          auto-pick) rendering into a reused node showed nothing. A fresh key
+          remounts, restarting the animations and the dismiss timer. */}
       {splashPick && splashPlayer && (
         <PickSplash
+          key={`${splashPick.id}:${splashPick.player_id}`}
           pick={splashPick}
           player={splashPlayer}
           teamName={
