@@ -517,6 +517,8 @@ export default function DraftPage() {
         isMyTurn={displayIsMyTurn}
         ownerMap={displayOwnerMap}
         timerSeconds={displaySeason.pick_timer_seconds}
+        seasonId={season?.id}
+        canControlClock={isCommissioner}
         onNextPick={displayNextPick}
       />
 

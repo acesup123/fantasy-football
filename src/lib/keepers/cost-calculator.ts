@@ -76,7 +76,9 @@ export interface KeeperCost {
  * year kept. So a player drafted in round 6 costs round 6 as a K1, round 5 as
  * a K2, round 4 as a K3, round 3 as a K4.
  *
- * Round 1 keepers always cost round 1.
+ * Round 1 keepers always cost round 1, and no keeper costs later than round
+ * 10 — a player drafted in round 13 is kept at round 10, the same as a free
+ * agent. Keeping a late-round pick is never cheaper than picking one up.
  *
  * A player with no record in `targetYear - 1` was picked up as a free agent
  * and starts at the free-agent keeper round.
@@ -140,11 +142,19 @@ export function computeKeeperCost(
 
   // K1 sits at last season's draft spot; escalation starts at K2.
   const escalates = last.isKeeper;
-  const roundCost = last.round === 1 ? 1 : Math.max(1, last.round - (escalates ? 1 : 0));
+  const uncapped = last.round === 1 ? 1 : Math.max(1, last.round - (escalates ? 1 : 0));
+
+  // Nothing is kept later than the free-agent round.
+  const roundCost = Math.min(uncapped, LEAGUE_CONFIG.FREE_AGENT_KEEPER_ROUND);
+  const capped = roundCost !== uncapped;
 
   let basis: string;
   if (last.round === 1) {
     basis = `${last.year} round 1 — round 1 keepers always cost round 1`;
+  } else if (capped) {
+    basis =
+      `${last.year} round ${last.round} → round ${roundCost} ` +
+      `(capped — keepers don't go past round ${LEAGUE_CONFIG.FREE_AGENT_KEEPER_ROUND})`;
   } else if (escalates) {
     basis = `${last.year} round ${last.round} (K${last.keeperYear}) → round ${roundCost} (K${keeperYear} escalates)`;
   } else {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireActingOwner } from "@/lib/api-auth";
+import { clockKey, startClock } from "@/lib/draft/clock";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -140,6 +141,20 @@ export async function POST(request: NextRequest) {
     if (updateSeasonErr) {
       console.error("Failed to update season pick number:", updateSeasonErr);
       // Pick was recorded, but season counter failed — log but don't fail the request
+    }
+
+    // Put the next pick on the clock immediately, so the countdown everyone
+    // sees starts from the moment this pick landed rather than from whenever
+    // each browser noticed.
+    if (!draftComplete) {
+      await supabase.from("league_settings").upsert(
+        {
+          key: clockKey(season_id),
+          value: startClock(nextOpen.overall_pick, Date.now()),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "key" }
+      );
     }
 
     return NextResponse.json({
