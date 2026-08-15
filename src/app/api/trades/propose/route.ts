@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
+import { requireActingOwner } from '@/lib/api-auth';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -40,6 +41,10 @@ export async function POST(request: Request) {
   if (proposer_id === accepter_id) {
     return NextResponse.json({ error: 'Cannot trade with yourself' }, { status: 400 });
   }
+
+  // Only the proposer (or the commissioner) may open a trade in their name
+  const auth = await requireActingOwner(proposer_id);
+  if (!auth.ok) return auth.response;
 
   // Verify both owners exist and are active
   const { data: owners } = await supabase

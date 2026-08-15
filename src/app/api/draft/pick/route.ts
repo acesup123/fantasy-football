@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireActingOwner } from "@/lib/api-auth";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -17,6 +18,11 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // owner_id arrives in the request body, so it is a claim, not an identity.
+    // Verify the caller actually is that owner (or the commissioner).
+    const auth = await requireActingOwner(owner_id);
+    if (!auth.ok) return auth.response;
 
     // 1. Verify the season is in "drafting" status and the current pick matches
     const { data: season, error: seasonErr } = await supabase

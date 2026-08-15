@@ -1,5 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
+import { requireCronSecret } from '@/lib/api-auth';
+import {
+  espnFetch,
+  getCurrentNFLSeason,
+  getOwnerName,
+  getDivisionNames,
+  hasEspnCredentials,
+  isSeasonComplete,
+  rankOrNull,
+} from '@/lib/espn/client';
 
 /**
  * GET /api/sync
@@ -17,34 +27,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const ESPN_LEAGUE_ID = process.env.ESPN_LEAGUE_ID ?? '130046';
-const ESPN_SWID = process.env.ESPN_SWID ?? '';
-const ESPN_S2 = process.env.ESPN_S2 ?? '';
-
-// ESPN Team ID → owner name
-const TEAM_OWNERS: Record<number, { name: string; from: number; to: number }[]> = {
-  1:  [{ name: 'Alex Altman', from: 2010, to: 9999 }],
-  2:  [{ name: 'Joel Oubre', from: 2010, to: 9999 }],
-  3:  [{ name: 'Kevin Whitlock', from: 2010, to: 9999 }],
-  4:  [{ name: 'Bill Kling', from: 2010, to: 2020 }, { name: 'Ryan Parrilla', from: 2021, to: 9999 }],
-  5:  [{ name: 'Kelly Mann', from: 2010, to: 9999 }],
-  6:  [{ name: 'Justin Choy', from: 2010, to: 9999 }],
-  7:  [{ name: 'Ed Lang', from: 2010, to: 9999 }],
-  8:  [{ name: 'Sal Singh', from: 2010, to: 9999 }],
-  9:  [{ name: 'Navi Singh', from: 2010, to: 9999 }],
-  10: [{ name: 'Aaron Schwartz', from: 2010, to: 2015 }, { name: 'Marcus Moore', from: 2016, to: 9999 }],
-  11: [{ name: 'Jason McCartney', from: 2010, to: 9999 }],
-  12: [{ name: 'Matt B', from: 2010, to: 2017 }, { name: 'Lance Michihira', from: 2018, to: 9999 }],
-};
-
-function getOwnerName(teamId: number, year: number): string | null {
-  const entries = TEAM_OWNERS[teamId];
-  if (!entries) return null;
-  for (const e of entries) {
-    if (year >= e.from && year <= e.to) return e.name;
-  }
-  return null;
-}
+// ESPN credentials, league id, the team→owner mapping and the fetch helper all
+// live in @/lib/espn/client so /api/standings/live shares them.
 
 // Cache owner IDs
 let ownerIdCache: Record<string, string> | null = null;
@@ -59,34 +43,18 @@ async function getOwnerIds(): Promise<Record<string, string>> {
   return ownerIdCache;
 }
 
-async function espnFetch(year: number, views: string[]): Promise<any> {
-  const viewParams = views.map(v => `view=${v}`).join('&');
-  const url = `https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${year}/segments/0/leagues/${ESPN_LEAGUE_ID}?${viewParams}`;
-  const resp = await fetch(url, {
-    headers: { Cookie: `SWID=${ESPN_SWID}; espn_s2=${ESPN_S2}` },
-    next: { revalidate: 0 },
-  });
-  if (!resp.ok) throw new Error(`ESPN API error: ${resp.status}`);
-  return resp.json();
-}
-
-function getCurrentNFLSeason(): number {
-  const now = new Date();
-  // NFL season year: if before March, it's the previous year's season
-  return now.getMonth() < 2 ? now.getFullYear() - 1 : now.getFullYear();
-}
-
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
 
-  // Optional cron auth
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const secret = searchParams.get('secret') ?? request.headers.get('authorization')?.replace('Bearer ', '');
-    if (secret !== cronSecret) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-  }
+  // Cron auth — fails CLOSED. This handler runs on the service-role client and
+  // deletes/re-inserts season_results and matchups, so an unguarded call is
+  // destructive. Previously the check was skipped entirely when CRON_SECRET was
+  // unset, which left the route open to the internet.
+  //
+  // Vercel sends `Authorization: Bearer $CRON_SECRET` on its own cron
+  // invocations once CRON_SECRET is set as an env var — no query string needed.
+  const auth = requireCronSecret(request);
+  if (!auth.ok) return auth.response;
 
   const year = parseInt(searchParams.get('year') ?? '') || getCurrentNFLSeason();
   const log: string[] = [];
@@ -95,7 +63,7 @@ export async function GET(request: Request) {
   log.push(`Syncing ESPN data for ${year} season`);
 
   // Check ESPN cookies work
-  if (!ESPN_SWID || !ESPN_S2) {
+  if (!hasEspnCredentials()) {
     return NextResponse.json({
       error: 'ESPN credentials not configured',
       log,
@@ -109,8 +77,14 @@ export async function GET(request: Request) {
     // 1. SYNC STANDINGS
     // ============================================================
     log.push('Fetching standings...');
-    const standingsData = await espnFetch(year, ['mTeam', 'mStandings']);
+    // mSettings carries scheduleSettings.divisions, needed for division names
+    const standingsData = await espnFetch(year, ['mTeam', 'mStandings', 'mSettings']);
     const teams = standingsData.teams ?? [];
+    const seasonComplete = isSeasonComplete(standingsData);
+    log.push(seasonComplete ? 'Season is complete' : 'Season in progress');
+
+    const divisionNames = getDivisionNames(standingsData);
+    log.push(`Divisions: ${divisionNames.size || 'none configured'}`);
 
     if (teams.length === 0) {
       log.push('WARNING: No teams returned — ESPN cookies may have expired');
@@ -169,19 +143,29 @@ export async function GET(request: Request) {
       if (!ownerId) continue;
 
       const rec = team.record?.overall ?? {};
-      const seed = team.playoffSeed ?? null;
+      const seed = rankOrNull(team.playoffSeed);
       let playoffResult: string | null = null;
       if (espnTeamId === championTeamId) playoffResult = 'champion';
       else if (espnTeamId === runnerUpTeamId) playoffResult = 'runner_up';
 
-      // Upsert: delete existing + insert
-      await supabase
-        .from('season_results')
-        .delete()
-        .eq('season_id', season.id)
-        .eq('owner_id', ownerId);
+      // Final placement after playoffs. ESPN keeps this field populated mid-season
+      // as a projection, so only record it once the season is actually complete —
+      // otherwise the draft lottery would seed off a guess.
+      const finalRank = seasonComplete ? rankOrNull(team.rankCalculatedFinal) : null;
 
-      await supabase.from('season_results').insert({
+      const streakType = rec.streakType ?? null;
+
+      // Divisions are per-season — a team can move between them year to year.
+      const divRec = team.record?.division ?? {};
+      const divisionId = typeof team.divisionId === 'number' ? team.divisionId : null;
+
+      // Real upsert on the (season_id, owner_id) unique constraint. This used to
+      // be delete-then-insert with neither error checked, so if the insert failed
+      // — e.g. migration 002 had not been applied and the new columns did not
+      // exist — the delete had already succeeded and the row was simply gone,
+      // while the route still reported success. An upsert never leaves the row
+      // transiently absent, and the error is checked below.
+      const { error: upsertError } = await supabase.from('season_results').upsert({
         season_id: season.id,
         owner_id: ownerId,
         wins: rec.wins ?? 0,
@@ -191,11 +175,49 @@ export async function GET(request: Request) {
         points_against: rec.pointsAgainst ?? 0,
         playoff_seed: seed,
         playoff_result: playoffResult,
+        // ESPN assigns playoffSeed strictly by regular-season standings order,
+        // so seed is the regular-season finish. final_rank is the post-playoff one.
         regular_season_finish: seed,
-      });
+        final_rank: finalRank,
+        streak_length: rec.streakLength ?? null,
+        streak_type:
+          streakType === 'WIN' || streakType === 'LOSS' || streakType === 'TIE'
+            ? streakType
+            : null,
+        games_back: rec.gamesBack ?? null,
+        division_id: divisionId,
+        division_name: divisionId === null ? null : divisionNames.get(divisionId) ?? null,
+        division_wins: typeof divRec.wins === 'number' ? divRec.wins : null,
+        division_losses: typeof divRec.losses === 'number' ? divRec.losses : null,
+        division_ties: typeof divRec.ties === 'number' ? divRec.ties : null,
+      }, { onConflict: 'season_id,owner_id' });
+
+      if (upsertError) {
+        // Fail loudly and stop. A partial standings write is worse than none:
+        // the lottery seeds off a complete 1-12 and silently falls back otherwise.
+        log.push(`ERROR writing standings for ${ownerName}: ${upsertError.message}`);
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Failed to write season_results: ${upsertError.message}`,
+            hint: 'If this mentions an unknown column, apply the latest migration in supabase/migrations/.',
+            log,
+          },
+          { status: 500 }
+        );
+      }
       resultCount++;
     }
     log.push(`Updated ${resultCount} team standings`);
+
+    if (resultCount !== teams.length) {
+      // Every ESPN team must map to an owner. A short count means the
+      // TEAM_OWNERS ranges have a gap, which would silently break the lottery.
+      log.push(
+        `WARNING: wrote ${resultCount} of ${teams.length} teams — check TEAM_OWNERS year ranges`
+      );
+      errors++;
+    }
 
     // ============================================================
     // 2. SYNC MATCHUPS

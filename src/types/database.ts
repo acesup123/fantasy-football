@@ -36,7 +36,13 @@ export interface SeasonResult {
   points_against: number;
   playoff_seed: number | null;
   playoff_result: 'champion' | 'runner_up' | 'third' | 'eliminated_rd2' | 'eliminated_rd1' | null;
+  /** Regular-season standings rank (ESPN playoffSeed). */
   regular_season_finish: number | null;
+  /** Final placement after playoffs (ESPN rankCalculatedFinal). Seeds the draft lottery. */
+  final_rank: number | null;
+  streak_length: number | null;
+  streak_type: 'WIN' | 'LOSS' | 'TIE' | null;
+  games_back: number | null;
   created_at: string;
 }
 

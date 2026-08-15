@@ -49,3 +49,9 @@ next-env.d.ts
 
 # one-off undo data from scripts/cleanup-players.ts
 scripts/.cleanup-backup-*.json
+
+# One-off scripts often hold live credentials — never commit them
+/scripts/*.py
+
+# ...but the example file carries no secrets and documents required vars
+!.env.local.example

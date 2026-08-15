@@ -4,6 +4,7 @@ import { fetchKeeperElections } from '@/lib/espn/keepers';
 import { fetchFinalRosters, keepsDraftStatus } from '@/lib/espn/rosters';
 import { hasEspnCredentials } from '@/lib/espn/request';
 import { getOwnerForTeam } from '@/lib/espn/config';
+import { requireCronSecret } from '@/lib/api-auth';
 import {
   computeKeeperCost,
   resolveRoundConflicts,
@@ -46,15 +47,10 @@ function upcomingSeason(): number {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
 
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const secret =
-      searchParams.get('secret') ??
-      request.headers.get('authorization')?.replace('Bearer ', '');
-    if (secret !== cronSecret) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-  }
+  // Fails CLOSED — this replaces the whole season's keepers on the
+  // service-role client, so an unguarded call is destructive.
+  const auth = requireCronSecret(request);
+  if (!auth.ok) return auth.response;
 
   const year = parseInt(searchParams.get('season') ?? '') || upcomingSeason();
   const dryRun = searchParams.get('dry') === '1';
