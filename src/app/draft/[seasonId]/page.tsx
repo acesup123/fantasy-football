@@ -319,8 +319,16 @@ export default function DraftPage() {
               : p
           )
         );
+        // The server tells us where the pointer landed. Assuming +1 lands on a
+        // keeper slot — 60 of the 180 are pre-filled — and stalls the board.
         setSeason((prev) =>
-          prev ? { ...prev, current_pick_number: currentPickNumber + 1 } : prev
+          prev
+            ? {
+                ...prev,
+                current_pick_number: data.next_pick ?? null,
+                draft_status: data.draft_complete ? "complete" : prev.draft_status,
+              }
+            : prev
         );
         setTimeout(() => setRecentPickId(undefined), 2000);
       } catch {

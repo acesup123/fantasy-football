@@ -106,10 +106,16 @@ export async function GET(request: Request) {
         { status: 404 }
       );
     }
-    if (season.draft_status === 'drafting' || season.draft_status === 'complete') {
+    // Locking keepers is what makes them final. Without this the nightly cron
+    // would keep rewriting them from ESPN after the commissioner locked them.
+    if (season.draft_status !== 'keepers_open' && season.draft_status !== 'pending') {
       return NextResponse.json(
-        { success: false, error: `Draft for ${year} is ${season.draft_status} — refusing to change keepers`, log },
-        { status: 400 }
+        {
+          success: false,
+          error: `Keepers for ${year} are ${season.draft_status} — refusing to change them`,
+          log,
+        },
+        { status: 409 }
       );
     }
 

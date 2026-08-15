@@ -111,12 +111,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 5. Increment current_pick_number on the season
+    // 5. Advance to the next slot that still needs a pick.
+    //
+    // A blind +1 deadlocks the draft: 60 of the 180 slots are pre-filled
+    // keepers, so the counter lands on one, every pick attempt there fails
+    // with "already been made", and nothing ever advances it again.
+    const { data: nextOpen } = await supabase
+      .from("draft_picks")
+      .select("overall_pick")
+      .eq("season_id", season_id)
+      .is("player_id", null)
+      .gt("overall_pick", overall_pick)
+      .order("overall_pick", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    const draftComplete = !nextOpen;
+
     const { error: updateSeasonErr } = await supabase
       .from("seasons")
-      .update({
-        current_pick_number: overall_pick + 1,
-      })
+      .update(
+        draftComplete
+          ? { current_pick_number: null, draft_status: "complete" }
+          : { current_pick_number: nextOpen.overall_pick }
+      )
       .eq("id", season_id);
 
     if (updateSeasonErr) {
@@ -124,7 +142,14 @@ export async function POST(request: NextRequest) {
       // Pick was recorded, but season counter failed — log but don't fail the request
     }
 
-    return NextResponse.json({ success: true, pick_number: overall_pick });
+    return NextResponse.json({
+      success: true,
+      pick_number: overall_pick,
+      // The client must use this rather than assuming +1 — the next slot is
+      // often a keeper further down the board.
+      next_pick: nextOpen?.overall_pick ?? null,
+      draft_complete: draftComplete,
+    });
   } catch (err) {
     console.error("Draft pick error:", err);
     return NextResponse.json(

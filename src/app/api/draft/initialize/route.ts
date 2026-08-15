@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { generateSnakeOrder } from "@/lib/draft/snake-order";
 import { requireCommissioner } from "@/lib/api-auth";
+import { fetchPickTrades } from "@/lib/draft/pick-ownership";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -70,10 +71,40 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // 5b. Traded picks. The snake order says who *originally* holds each slot;
+    // accepted future_pick trades move current ownership. Without this an owner
+    // drafts with a pick they traded away.
+    const pickTrades = await fetchPickTrades(supabase, season.year);
+    const tradedAway = new Map<string, number[]>();   // ownerId -> rounds given up
+    const tradedFor = new Map<string, number[]>();    // ownerId -> rounds received
+    for (const t of pickTrades) {
+      if (!tradedAway.has(t.fromOwnerId)) tradedAway.set(t.fromOwnerId, []);
+      tradedAway.get(t.fromOwnerId)!.push(t.round);
+      if (!tradedFor.has(t.toOwnerId)) tradedFor.set(t.toOwnerId, []);
+      tradedFor.get(t.toOwnerId)!.push(t.round);
+    }
+
+    /** Who actually owns this slot after trades. */
+    const currentOwnerOf = (slot: { round: number; ownerId: string }): string => {
+      const gaveUp = tradedAway.get(slot.ownerId);
+      if (!gaveUp) return slot.ownerId;
+      const idx = gaveUp.indexOf(slot.round);
+      if (idx === -1) return slot.ownerId;
+
+      // This owner traded a pick in this round — hand the slot to the receiver.
+      gaveUp.splice(idx, 1);
+      const receiver = pickTrades.find(
+        t => t.fromOwnerId === slot.ownerId && t.round === slot.round
+      );
+      return receiver?.toOwnerId ?? slot.ownerId;
+    };
+
     // 6. Build draft_picks rows
     // For keeper slots: match keeper round_cost to the slot's round for that owner
     const pickRows = slots.map((slot) => {
-      const ownerKeepers = keepersByOwner.get(slot.ownerId) ?? [];
+      const currentOwnerId = currentOwnerOf(slot);
+      // Keepers occupy their owner's slot, so match against whoever holds it now.
+      const ownerKeepers = keepersByOwner.get(currentOwnerId) ?? [];
       // Find a keeper assigned to this round
       const keeperMatch = ownerKeepers.find((k) => k.round_cost === slot.round);
 
@@ -89,7 +120,7 @@ export async function POST(request: NextRequest) {
         pick_in_round: slot.pickInRound,
         overall_pick: slot.overallPick,
         original_owner_id: slot.ownerId,
-        current_owner_id: slot.ownerId,
+        current_owner_id: currentOwnerId,
         player_id: keeperMatch?.player_id ?? null,
         is_keeper: !!keeperMatch,
         keeper_year: keeperMatch?.keeper_year ?? null,
@@ -139,11 +170,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Every keeper must have landed in a slot — an unplaced one means the
+    // owner has no pick in that round (traded away, or a cost collision that
+    // wasn't resolved), and they'd silently lose the player.
+    const unplaced = [...keepersByOwner.entries()].flatMap(([ownerId, ks]) =>
+      ks.map((k) => ({ owner_id: ownerId, player_id: k.player_id, round_cost: k.round_cost }))
+    );
+
     return NextResponse.json({
       success: true,
       total_picks: pickRows.length,
       keeper_picks: pickRows.filter((p) => p.is_keeper).length,
       starting_pick: startingPick,
+      traded_picks_applied: pickTrades.length,
+      unplaced_keepers: unplaced,
     });
   } catch (err) {
     console.error("Draft initialize error:", err);

@@ -114,6 +114,9 @@ export default function LotteryClient({
   const [drumrollIntensity, setDrumrollIntensity] = useState(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const drumrollRef = useRef<NodeJS.Timeout | null>(null);
+  const [manualOrder, setManualOrder] = useState<string[]>([]);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const [saveResult, setSaveResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   const ownerMap = useMemo(
     () => new Map(owners.map((o) => [o.id, o])),
@@ -134,6 +137,64 @@ export default function LotteryClient({
       // Corrupt entry — fall back to the default order
     }
   }, [defaultOrder, LOTTERY_ORDER_STORAGE_KEY]);
+
+  /**
+   * Persist a hand-entered order — for a lottery that was already drawn live
+   * and just needs recording, without re-running the reveal.
+   */
+  const saveManualOrder = useCallback(async () => {
+    if (manualOrder.length !== 12 || new Set(manualOrder).size !== 12) return;
+    setSavingOrder(true);
+    setSaveResult(null);
+    try {
+      const resp = await fetch("/api/draft/order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ season_year: seasonYear, draft_order: manualOrder }),
+      });
+      const data = await resp.json();
+      setSaveResult(
+        resp.ok
+          ? { ok: true, message: `Saved — ${seasonYear} draft order is locked in.` }
+          : { ok: false, message: data.error ?? "Failed to save draft order" }
+      );
+    } catch {
+      setSaveResult({ ok: false, message: "Network error — the order was not saved" });
+    }
+    setSavingOrder(false);
+  }, [manualOrder, seasonYear]);
+
+  /**
+   * Persist the drawn order to the season.
+   *
+   * The reveal is entirely client-side, so until this runs the result exists
+   * only in React state — a refresh loses it, and /api/draft/initialize
+   * refuses to build a board without seasons.draft_order.
+   */
+  const saveDraftOrder = useCallback(async () => {
+    if (!lotteryResult) return;
+    setSavingOrder(true);
+    setSaveResult(null);
+    try {
+      const resp = await fetch("/api/draft/order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          season_year: seasonYear,
+          draft_order: lotteryResult.draftOrder,
+        }),
+      });
+      const data = await resp.json();
+      setSaveResult(
+        resp.ok
+          ? { ok: true, message: `Saved — ${seasonYear} draft order is locked in.` }
+          : { ok: false, message: data.error ?? "Failed to save draft order" }
+      );
+    } catch {
+      setSaveResult({ ok: false, message: "Network error — the order was not saved" });
+    }
+    setSavingOrder(false);
+  }, [lotteryResult, seasonYear]);
 
   // Assign an owner to a lottery slot, swapping with whoever currently holds it.
   // Swapping (rather than overwriting) keeps the order a valid 1-12 permutation.
@@ -677,9 +738,43 @@ export default function LotteryClient({
                 })}
             </div>
 
-            <button onClick={closeLottery} className="btn-primary px-8 py-3">
-              Done
-            </button>
+            {saveResult && (
+              <div
+                className={`mb-4 text-sm font-semibold ${
+                  saveResult.ok ? "text-accent" : "text-danger"
+                }`}
+              >
+                {saveResult.message}
+              </div>
+            )}
+
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={saveDraftOrder}
+                disabled={savingOrder || saveResult?.ok}
+                className={`btn-primary px-8 py-3 ${
+                  savingOrder || saveResult?.ok ? "opacity-50" : ""
+                }`}
+              >
+                {savingOrder
+                  ? "Saving..."
+                  : saveResult?.ok
+                  ? "Saved"
+                  : "Save draft order"}
+              </button>
+              <button
+                onClick={closeLottery}
+                className="px-8 py-3 bg-background border border-border rounded-lg text-sm hover:bg-card-hover transition-colors"
+              >
+                {saveResult?.ok ? "Done" : "Close without saving"}
+              </button>
+            </div>
+
+            {!saveResult?.ok && (
+              <p className="mt-3 text-[11px] text-muted">
+                The order is not stored until you save it — closing now loses the result.
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -878,6 +973,76 @@ export default function LotteryClient({
                 })}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* Enter an already-drawn lottery by hand */}
+      <div className="bg-card border border-border rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-border">
+          <h2 className="font-bold text-sm">Enter Lottery Results</h2>
+          <p className="text-[11px] text-muted mt-0.5">
+            Already drew the lottery? Record the result here instead of re-running it.
+            Pick 1 is the first overall selection.
+          </p>
+        </div>
+
+        <div className="p-4 grid grid-cols-2 md:grid-cols-3 gap-2">
+          {Array.from({ length: 12 }, (_, i) => i).map((idx) => {
+            const taken = new Set(manualOrder.filter((_, j) => j !== idx));
+            return (
+              <label key={idx} className="flex items-center gap-2">
+                <span className="text-[10px] font-mono text-muted w-12 flex-shrink-0">
+                  Pick {idx + 1}
+                </span>
+                <select
+                  value={manualOrder[idx] ?? ""}
+                  onChange={(e) => {
+                    const next = [...manualOrder];
+                    while (next.length < 12) next.push("");
+                    next[idx] = e.target.value;
+                    setManualOrder(next);
+                    setSaveResult(null);
+                  }}
+                  className="flex-1 min-w-0 px-2 py-1 bg-background border border-border rounded text-xs focus:outline-none focus:border-accent"
+                >
+                  <option value="">—</option>
+                  {owners.map((o) => (
+                    <option key={o.id} value={o.id} disabled={taken.has(o.id)}>
+                      {o.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            );
+          })}
+        </div>
+
+        <div className="px-4 pb-4 flex items-center gap-3">
+          <button
+            onClick={saveManualOrder}
+            disabled={
+              savingOrder ||
+              manualOrder.filter(Boolean).length !== 12 ||
+              new Set(manualOrder.filter(Boolean)).size !== 12
+            }
+            className={`btn-primary text-xs px-4 py-2 ${
+              savingOrder || manualOrder.filter(Boolean).length !== 12 ? "opacity-40" : ""
+            }`}
+          >
+            {savingOrder ? "Saving..." : "Save draft order"}
+          </button>
+          <span className="text-[11px] text-muted">
+            {manualOrder.filter(Boolean).length}/12 assigned
+          </span>
+          {saveResult && (
+            <span
+              className={`text-[11px] font-semibold ${
+                saveResult.ok ? "text-accent" : "text-danger"
+              }`}
+            >
+              {saveResult.message}
+            </span>
+          )}
         </div>
       </div>
 
