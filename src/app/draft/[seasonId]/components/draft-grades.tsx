@@ -1,23 +1,25 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { DraftPick, Owner, Player } from "@/types/database";
 import {
-  gradeDraft,
   DRAFT_WEIGHTS,
   ROSTER_WEIGHTS,
   type DraftComponent,
   type RosterComponent,
-  type RankEntry,
   type TeamGrade,
 } from "@/lib/draft/grade";
 import { abbreviateName } from "@/lib/draft/roster-requirements";
 
 interface DraftGradesProps {
-  picks: DraftPick[];
-  owners: Owner[];
-  playerMap: Map<number, Player>;
-  ranks?: Record<string, RankEntry>;
+  /** Graded once by the board and shared, so a pick replays the draft once. */
+  grades: TeamGrade[];
+  hasRanks: boolean;
+  /**
+   * Before the draft ends the headline letter is the curve — an absolute score
+   * on a half-built roster reads as "everyone is failing". After it ends the
+   * absolute letter is the honest one.
+   */
+  isDraftComplete: boolean;
   currentOwnerId?: string;
 }
 
@@ -44,26 +46,18 @@ function letterClass(letter: string): string {
 }
 
 export function DraftGrades({
-  picks,
-  owners,
-  playerMap,
-  ranks,
+  grades,
+  hasRanks,
+  isDraftComplete,
   currentOwnerId,
 }: DraftGradesProps) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortKey>("roster");
 
-  const grades = useMemo(
-    () => gradeDraft({ picks, owners, playerMap, ranks: ranks ?? {} }),
-    [picks, owners, playerMap, ranks]
-  );
-
   const sorted = useMemo(
     () => [...grades].sort((a, b) => a[sortBy].rank - b[sortBy].rank),
     [grades, sortBy]
   );
-
-  const hasRanks = ranks && Object.keys(ranks).length > 0;
 
   // The teams whose two grades disagree most — the story the split exists to tell.
   const biggestSplit = useMemo(() => {
@@ -104,6 +98,13 @@ export function DraftGrades({
             <span className="text-foreground font-bold">Roster</span> grades what
             you now own, keepers included. They diverge on purpose.
           </p>
+          {!isDraftComplete && (
+            <p className="text-[11px] text-warning leading-relaxed">
+              The draft is still running, so the letters are curved against the
+              league right now — B is the field average. They switch to absolute
+              scores once the draft finishes.
+            </p>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -140,6 +141,7 @@ export function DraftGrades({
           <GradeRow
             key={g.ownerId}
             grade={g}
+            useCurve={!isDraftComplete}
             isMe={g.ownerId === currentOwnerId}
             isOpen={expanded === g.ownerId}
             onToggle={() =>
@@ -181,11 +183,13 @@ function ordinal(n: number): string {
 
 function GradeRow({
   grade,
+  useCurve,
   isMe,
   isOpen,
   onToggle,
 }: {
   grade: TeamGrade;
+  useCurve: boolean;
   isMe: boolean;
   isOpen: boolean;
   onToggle: () => void;
@@ -213,11 +217,13 @@ function GradeRow({
           <div className="hidden sm:grid flex-1 grid-cols-2 gap-3">
             <GradeCell
               block={grade.draft}
+              letter={useCurve ? grade.curve.draft.letter : grade.draft.letter}
               parts={DRAFT_PARTS}
               weights={DRAFT_WEIGHTS}
             />
             <GradeCell
               block={grade.roster}
+              letter={useCurve ? grade.curve.roster.letter : grade.roster.letter}
               parts={ROSTER_PARTS}
               weights={ROSTER_WEIGHTS}
             />
@@ -225,8 +231,14 @@ function GradeRow({
 
           {/* Stacked on small screens */}
           <div className="sm:hidden flex items-center gap-3">
-            <MiniGrade label="Draft" block={grade.draft} />
-            <MiniGrade label="Roster" block={grade.roster} />
+            <MiniGrade
+              label="Draft"
+              letter={useCurve ? grade.curve.draft.letter : grade.draft.letter}
+            />
+            <MiniGrade
+              label="Roster"
+              letter={useCurve ? grade.curve.roster.letter : grade.roster.letter}
+            />
           </div>
         </div>
       </button>
@@ -236,12 +248,14 @@ function GradeRow({
   );
 }
 
-function GradeCell<C extends string>({
+function GradeCell({
   block,
+  letter,
   parts,
   weights,
 }: {
   block: TeamGrade["draft"] | TeamGrade["roster"];
+  letter: string;
   parts: { key: string; label: string; className: string }[];
   weights: Record<string, number>;
 }) {
@@ -253,9 +267,9 @@ function GradeCell<C extends string>({
         {block.rank}
       </span>
       <span
-        className={`text-base font-black tracking-tight w-8 flex-shrink-0 ${letterClass(block.letter)}`}
+        className={`text-base font-black tracking-tight w-8 flex-shrink-0 ${letterClass(letter)}`}
       >
-        {block.letter}
+        {letter}
       </span>
       <span className="flex-1 min-w-0 h-3 rounded-sm bg-background/40 flex overflow-hidden">
         {parts.map((p) => (
@@ -274,20 +288,14 @@ function GradeCell<C extends string>({
   );
 }
 
-function MiniGrade({
-  label,
-  block,
-}: {
-  label: string;
-  block: TeamGrade["draft"] | TeamGrade["roster"];
-}) {
+function MiniGrade({ label, letter }: { label: string; letter: string }) {
   return (
     <span className="text-center">
       <span className="block text-[8px] uppercase tracking-wider text-muted">
         {label}
       </span>
-      <span className={`block text-base font-black ${letterClass(block.letter)}`}>
-        {block.letter}
+      <span className={`block text-base font-black ${letterClass(letter)}`}>
+        {letter}
       </span>
     </span>
   );

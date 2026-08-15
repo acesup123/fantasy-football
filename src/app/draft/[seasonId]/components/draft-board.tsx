@@ -8,7 +8,20 @@ import { abbreviateName } from "@/lib/draft/roster-requirements";
 import { EspnPlayerName } from "@/components/espn-profile-modal";
 import { RosterGrid } from "./roster-grid";
 import { DraftGrades } from "./draft-grades";
-import type { RankEntry } from "@/lib/draft/grade";
+import { gradeDraft, type RankEntry } from "@/lib/draft/grade";
+
+function gradeLetterClass(letter: string): string {
+  if (letter.startsWith("A")) return "text-grade-a";
+  if (letter.startsWith("B")) return "text-grade-b";
+  if (letter.startsWith("C")) return "text-grade-c";
+  return "text-grade-d";
+}
+
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
 
 interface DraftBoardProps {
   picks: DraftPick[];
@@ -83,6 +96,19 @@ export function DraftBoard({
     return counts;
   }, [picks]);
 
+  // Graded once here and handed to whichever view is showing. Both the board
+  // headers and the rosters view need it, and replaying the draft twice per
+  // pick is wasted work.
+  const grades = useMemo(
+    () => gradeDraft({ picks, owners, playerMap, ranks: ranks ?? {} }),
+    [picks, owners, playerMap, ranks]
+  );
+
+  const gradeByOwner = useMemo(
+    () => new Map(grades.map((g) => [g.ownerId, g])),
+    [grades]
+  );
+
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden shadow-lg min-w-0">
       {/* Board header */}
@@ -104,41 +130,34 @@ export function DraftBoard({
           </span>
 
           {/* View toggle */}
+          {/* Grades used to stay locked until the draft finished, on the
+              reasoning that a half-built roster grades as junk. Curving against
+              the league removes that problem — mid-draft the letters answer
+              "am I ahead of this room", which is worth seeing while you can
+              still act on it. */}
           <div className="flex rounded-md bg-background/60 p-0.5">
-            {(["board", "rosters", "grades"] as const).map((v) => {
-              // Grading a draft in progress reads as a verdict on a roster that
-              // isn't built yet, so the tab stays disabled until it's done.
-              const locked = v === "grades" && !isDraftComplete;
-              return (
-                <button
-                  key={v}
-                  onClick={() => !locked && onViewChange(v)}
-                  disabled={locked}
-                  title={
-                    locked ? "Grades unlock when the draft is complete" : undefined
-                  }
-                  className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide transition-all ${
-                    view === v
-                      ? "bg-accent text-background"
-                      : locked
-                        ? "text-muted/40 cursor-not-allowed"
-                        : "text-muted hover:text-foreground"
-                  }`}
-                >
-                  {v === "board" ? "Board" : v === "rosters" ? "Rosters" : "Grades"}
-                </button>
-              );
-            })}
+            {(["board", "rosters", "grades"] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => onViewChange(v)}
+                className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide transition-all ${
+                  view === v
+                    ? "bg-accent text-background"
+                    : "text-muted hover:text-foreground"
+                }`}
+              >
+                {v === "board" ? "Board" : v === "rosters" ? "Rosters" : "Grades"}
+              </button>
+            ))}
           </div>
         </div>
       </div>
 
       {view === "grades" ? (
         <DraftGrades
-          picks={picks}
-          owners={owners}
-          playerMap={playerMap}
-          ranks={ranks}
+          grades={grades}
+          hasRanks={!!ranks && Object.keys(ranks).length > 0}
+          isDraftComplete={isDraftComplete}
           currentOwnerId={currentOwnerId}
         />
       ) : view === "rosters" ? (
@@ -148,7 +167,7 @@ export function DraftBoard({
             owners={owners}
             playerMap={playerMap}
             currentOwnerId={currentOwnerId}
-            ranks={ranks}
+            grades={grades}
           />
         </div>
       ) : (
@@ -180,6 +199,8 @@ export function DraftBoard({
                 const isCurrent = round1Pick?.original_owner_id ===
                   picks.find((p) => p.overall_pick === currentPickNumber)?.current_owner_id;
 
+                const grade = owner ? gradeByOwner.get(owner.id) : undefined;
+
                 return (
                   <th
                     key={i}
@@ -191,8 +212,24 @@ export function DraftBoard({
                     <div className="text-[10px] font-bold truncate leading-tight">
                       {owner?.team_name ?? `Pick ${i + 1}`}
                     </div>
-                    <div className="text-[9px] text-muted">
-                      {count}/{LEAGUE_CONFIG.NUM_ROUNDS}
+                    <div className="flex items-center justify-center gap-1 leading-none">
+                      <span className="text-[9px] text-muted">
+                        {count}/{LEAGUE_CONFIG.NUM_ROUNDS}
+                      </span>
+                      {grade && (
+                        <span
+                          className={`text-[10px] font-black ${gradeLetterClass(
+                            grade.curve.roster.letter
+                          )}`}
+                          title={`Roster grade — ${ordinal(
+                            grade.curve.roster.rank
+                          )} in the league right now, curved against the field. ${
+                            grade.qbRoom.length
+                          } QB${grade.qbRoom.length === 1 ? " — superflex hole" : ""}.`}
+                        >
+                          {grade.curve.roster.letter}
+                        </span>
+                      )}
                     </div>
                   </th>
                 );

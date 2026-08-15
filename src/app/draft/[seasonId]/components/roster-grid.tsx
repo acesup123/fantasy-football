@@ -9,14 +9,15 @@ import {
   POSITION_ORDER,
   type OwnerRoster,
 } from "@/lib/draft/roster-requirements";
-import { gradeDraft, type CurvedGrade, type RankEntry } from "@/lib/draft/grade";
+import type { CurvedGrade, TeamGrade } from "@/lib/draft/grade";
 
 interface RosterGridProps {
   picks: DraftPick[];
   owners: Owner[];
   playerMap: Map<number, Player>;
   currentOwnerId?: string;
-  ranks?: Record<string, RankEntry>;
+  /** Graded once by the board and shared, so a pick replays the draft once. */
+  grades: TeamGrade[];
 }
 
 function curveLetterClass(letter: string): string {
@@ -86,24 +87,18 @@ export function RosterGrid({
   owners,
   playerMap,
   currentOwnerId,
-  ranks,
+  grades,
 }: RosterGridProps) {
   const rosters = useMemo(
     () => buildOwnerRosters(picks, playerMap),
     [picks, playerMap]
   );
 
-  // Live grades, curved against the rest of the league right now. Recomputed on
-  // every pick, which is why they're keyed off `picks` and nothing else.
-  const curves = useMemo(() => {
-    const graded = gradeDraft({ picks, owners, playerMap, ranks: ranks ?? {} });
-    return new Map(
-      graded.map((g) => [
-        g.ownerId,
-        { curve: g.curve, livePicks: g.draft.components, keeperCount: g.keeperCount },
-      ])
-    );
-  }, [picks, owners, playerMap, ranks]);
+  // Live grades, curved against the rest of the league right now.
+  const curves = useMemo(
+    () => new Map(grades.map((g) => [g.ownerId, { curve: g.curve }])),
+    [grades]
+  );
 
   // How many live picks each team has made — the curve compares teams that
   // aren't always level, and at the turn that gap is a full pick.
