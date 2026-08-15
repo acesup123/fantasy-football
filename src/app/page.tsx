@@ -198,6 +198,11 @@ export default async function HomePage() {
 
       {/* Quick links */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <a href="/standings" className="nav-card nav-card-accent group">
+          <div className="text-2xl mb-2">&#127942;</div>
+          <div className="font-black text-accent text-sm group-hover:underline underline-offset-4">Standings</div>
+          <p className="text-xs text-muted mt-1">Live records, points for and against, streaks</p>
+        </a>
         <a href="/admin/lottery" className="nav-card nav-card-accent group">
           <div className="text-2xl mb-2">&#127920;</div>
           <div className="font-black text-accent text-sm group-hover:underline underline-offset-4">Draft Lottery</div>

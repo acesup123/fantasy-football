@@ -46,3 +46,9 @@ next-env.d.ts
 *.csv
 !scripts/*.csv
 .claude/worktrees/
+
+# One-off scripts often hold live credentials — never commit them
+/scripts/*.py
+
+# ...but the example file carries no secrets and documents required vars
+!.env.local.example
