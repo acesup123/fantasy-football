@@ -480,6 +480,31 @@ function computePassedOver(
   return result;
 }
 
+/**
+ * Which letter to actually show, for one team and one of the two grades.
+ *
+ * There is exactly one rule and it lives here: while the draft is running the
+ * curved letter is the honest one (an absolute score on a half-built roster
+ * reads as "everyone is failing"), and once it finishes the absolute letter is.
+ *
+ * This exists because the board, the roster columns and the grades table each
+ * used to decide for themselves, so the moment the draft completed the board
+ * was still showing curved letters while the table had switched to absolute —
+ * the same team reading A− in one place and C in another.
+ */
+export function displayGrade(
+  grade: TeamGrade,
+  which: 'draft' | 'roster',
+  isDraftComplete: boolean
+): { letter: string; rank: number; score: number; curved: boolean } {
+  const block = grade[which];
+  if (isDraftComplete) {
+    return { letter: block.letter, rank: block.rank, score: block.score, curved: false };
+  }
+  const curved = grade.curve[which];
+  return { letter: curved.letter, rank: curved.rank, score: block.score, curved: true };
+}
+
 export interface GradeInput {
   picks: DraftPick[];
   owners: Owner[];

@@ -8,7 +8,7 @@ import { abbreviateName } from "@/lib/draft/roster-requirements";
 import { EspnPlayerName } from "@/components/espn-profile-modal";
 import { RosterGrid } from "./roster-grid";
 import { DraftGrades } from "./draft-grades";
-import { gradeDraft, type RankEntry } from "@/lib/draft/grade";
+import { gradeDraft, displayGrade, type RankEntry } from "@/lib/draft/grade";
 
 function gradeLetterClass(letter: string): string {
   if (letter.startsWith("A")) return "text-grade-a";
@@ -168,6 +168,7 @@ export function DraftBoard({
             playerMap={playerMap}
             currentOwnerId={currentOwnerId}
             grades={grades}
+            isDraftComplete={isDraftComplete}
           />
         </div>
       ) : (
@@ -216,20 +217,28 @@ export function DraftBoard({
                       <span className="text-[9px] text-muted">
                         {count}/{LEAGUE_CONFIG.NUM_ROUNDS}
                       </span>
-                      {grade && (
-                        <span
-                          className={`text-[10px] font-black ${gradeLetterClass(
-                            grade.curve.roster.letter
-                          )}`}
-                          title={`Roster grade — ${ordinal(
-                            grade.curve.roster.rank
-                          )} in the league right now, curved against the field. ${
-                            grade.qbRoom.length
-                          } QB${grade.qbRoom.length === 1 ? " — superflex hole" : ""}.`}
-                        >
-                          {grade.curve.roster.letter}
-                        </span>
-                      )}
+                      {grade &&
+                        (() => {
+                          const shown = displayGrade(
+                            grade,
+                            "roster",
+                            isDraftComplete
+                          );
+                          return (
+                            <span
+                              className={`text-[10px] font-black ${gradeLetterClass(shown.letter)}`}
+                              title={`Roster grade — ${ordinal(shown.rank)} in the league${
+                                shown.curved
+                                  ? ", curved against the field while the draft runs"
+                                  : ` (${Math.round(shown.score)}/100)`
+                              }. ${grade.qbRoom.length} QB${
+                                grade.qbRoom.length === 1 ? " — superflex hole" : ""
+                              }.`}
+                            >
+                              {shown.letter}
+                            </span>
+                          );
+                        })()}
                     </div>
                   </th>
                 );

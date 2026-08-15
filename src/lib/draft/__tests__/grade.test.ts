@@ -3,6 +3,7 @@ import {
   gradeDraft,
   pickStarters,
   curveScores,
+  displayGrade,
   DRAFT_WEIGHTS,
   ROSTER_WEIGHTS,
   type RankEntry,
@@ -544,6 +545,73 @@ describe('curveScores — live grades during the draft', () => {
     const strong = grades.find((g) => g.ownerId === 'a')!;
     const weak = grades.find((g) => g.ownerId === 'b')!;
     expect(strong.curve.roster.rank).toBeLessThan(weak.curve.roster.rank);
+  });
+});
+
+describe('displayGrade — one scale everywhere', () => {
+  /**
+   * The regression this locks down: the board, the roster columns and the
+   * grades table each chose their own letter. The board stayed on the curve
+   * while the table switched to absolute the moment the draft completed, so the
+   * same team read A− in one place and C in another.
+   */
+  function twoTeams() {
+    const a = buildTeam('a', BALANCED, 1);
+    const b = buildTeam(
+      'b',
+      BALANCED.map((s) =>
+        s.name === 'QB B' ? { ...s, name: 'WR F', pos: 'WR' as const } : s
+      ),
+      2
+    );
+    return gradeDraft({
+      picks: [...a.picks, ...b.picks],
+      owners: [owner('a'), owner('b')],
+      playerMap: new Map([...a.players, ...b.players].map((p) => [p.id, p])),
+      ranks: { ...a.ranks, ...b.ranks },
+    });
+  }
+
+  it('returns the curved letter while the draft is running', () => {
+    for (const g of twoTeams()) {
+      const shown = displayGrade(g, 'roster', false);
+      expect(shown.curved).toBe(true);
+      expect(shown.letter).toBe(g.curve.roster.letter);
+      expect(shown.rank).toBe(g.curve.roster.rank);
+    }
+  });
+
+  it('returns the absolute letter once the draft is complete', () => {
+    for (const g of twoTeams()) {
+      const shown = displayGrade(g, 'roster', true);
+      expect(shown.curved).toBe(false);
+      expect(shown.letter).toBe(g.roster.letter);
+      expect(shown.rank).toBe(g.roster.rank);
+    }
+  });
+
+  it('gives the same answer for the same inputs, every call site', () => {
+    const [g] = twoTeams();
+    for (const complete of [true, false]) {
+      const board = displayGrade(g, 'roster', complete);
+      const column = displayGrade(g, 'roster', complete);
+      const table = displayGrade(g, 'roster', complete);
+      expect(board).toEqual(column);
+      expect(column).toEqual(table);
+    }
+  });
+
+  it('always reports the absolute score, whichever letter is shown', () => {
+    const [g] = twoTeams();
+    expect(displayGrade(g, 'roster', false).score).toBe(g.roster.score);
+    expect(displayGrade(g, 'roster', true).score).toBe(g.roster.score);
+    expect(displayGrade(g, 'draft', false).score).toBe(g.draft.score);
+  });
+
+  it('covers the draft grade as well as the roster grade', () => {
+    const [g] = twoTeams();
+    expect(displayGrade(g, 'draft', false).letter).toBe(g.curve.draft.letter);
+    expect(displayGrade(g, 'draft', true).letter).toBe(g.draft.letter);
   });
 });
 

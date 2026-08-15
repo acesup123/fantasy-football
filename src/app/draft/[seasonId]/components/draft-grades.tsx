@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import {
+  displayGrade,
   DRAFT_WEIGHTS,
   ROSTER_WEIGHTS,
   type DraftComponent,
@@ -142,6 +143,7 @@ export function DraftGrades({
             key={g.ownerId}
             grade={g}
             useCurve={!isDraftComplete}
+            isDraftComplete={isDraftComplete}
             isMe={g.ownerId === currentOwnerId}
             isOpen={expanded === g.ownerId}
             onToggle={() =>
@@ -183,12 +185,14 @@ function ordinal(n: number): string {
 
 function GradeRow({
   grade,
+  isDraftComplete,
   useCurve,
   isMe,
   isOpen,
   onToggle,
 }: {
   grade: TeamGrade;
+  isDraftComplete: boolean;
   useCurve: boolean;
   isMe: boolean;
   isOpen: boolean;
@@ -243,7 +247,7 @@ function GradeRow({
         </div>
       </button>
 
-      {isOpen && <GradeDetail grade={grade} />}
+      {isOpen && <GradeDetail grade={grade} isDraftComplete={isDraftComplete} />}
     </div>
   );
 }
@@ -301,7 +305,13 @@ function MiniGrade({ label, letter }: { label: string; letter: string }) {
   );
 }
 
-function GradeDetail({ grade }: { grade: TeamGrade }) {
+function GradeDetail({
+  grade,
+  isDraftComplete,
+}: {
+  grade: TeamGrade;
+  isDraftComplete: boolean;
+}) {
   const { bestValue, biggestReach, byeCollision } = grade;
 
   return (
@@ -309,8 +319,8 @@ function GradeDetail({ grade }: { grade: TeamGrade }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <Panel
           title="Draft"
-          rank={grade.draft.rank}
-          letter={grade.draft.letter}
+          rank={displayGrade(grade, "draft", isDraftComplete).rank}
+          letter={displayGrade(grade, "draft", isDraftComplete).letter}
           verdict={grade.draftVerdict}
           parts={DRAFT_PARTS}
           components={grade.draft.components as Record<string, number>}
@@ -352,8 +362,8 @@ function GradeDetail({ grade }: { grade: TeamGrade }) {
 
         <Panel
           title="Roster"
-          rank={grade.roster.rank}
-          letter={grade.roster.letter}
+          rank={displayGrade(grade, "roster", isDraftComplete).rank}
+          letter={displayGrade(grade, "roster", isDraftComplete).letter}
           verdict={grade.rosterVerdict}
           parts={ROSTER_PARTS}
           components={grade.roster.components as Record<string, number>}
