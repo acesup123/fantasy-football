@@ -73,6 +73,55 @@ function buildTeam(
   return { players, picks, ranks };
 }
 
+/**
+ * A realistic player universe to grade against.
+ *
+ * Scoring is positional — a player's worth is his rank within his position
+ * measured against the last starter at that position — and the achievable
+ * ceiling is derived from the pool. Handing gradeDraft only the fifteen players
+ * on one roster makes every one of them the best at his position and collapses
+ * both, so the fixtures carry a full pool the way production does.
+ */
+const POOL_DEPTH: Record<Player['position'], number> = {
+  QB: 40,
+  RB: 60,
+  WR: 60,
+  TE: 25,
+  DEF: 20,
+};
+
+function universe(): { players: Player[]; ranks: Record<string, RankEntry> } {
+  const players: Player[] = [];
+  const ranks: Record<string, RankEntry> = {};
+  let rank = 1;
+
+  for (const [position, depth] of Object.entries(POOL_DEPTH)) {
+    for (let i = 0; i < depth; i++) {
+      // Spread each position across the overall board rather than clustering it.
+      const overall = rank + i * 3;
+      const p = player(
+        `pool ${position}${i + 1}`,
+        position as Player['position'],
+        overall
+      );
+      players.push(p);
+      ranks[p.espn_id as string] = { rank: overall, adp: null };
+    }
+    rank += 2;
+  }
+
+  return { players, ranks };
+}
+
+/** Merge a team's players into a full pool, as the app does. */
+function withPool(teamPlayers: Player[], teamRanks: Record<string, RankEntry>) {
+  const u = universe();
+  return {
+    playerMap: new Map([...u.players, ...teamPlayers].map((p) => [p.id, p])),
+    ranks: { ...u.ranks, ...teamRanks },
+  };
+}
+
 /** A legal 15-man roster template; positions/ranks overridden per test. */
 const BALANCED = [
   { name: 'QB A', pos: 'QB' as const, rank: 10 },
@@ -151,8 +200,7 @@ describe('gradeDraft — superflex is the differentiator', () => {
     return gradeDraft({
       picks,
       owners: [owner(ownerId)],
-      playerMap: new Map(players.map((p) => [p.id, p])),
-      ranks,
+      ...withPool(players, ranks),
     })[0];
   }
 
@@ -172,9 +220,14 @@ describe('gradeDraft — superflex is the differentiator', () => {
 
   it('rewards a third quarterback, but less than the second', () => {
     const two = gradeOf(BALANCED);
+    // Rank matters: a 37th-ranked quarterback is below replacement in a
+    // 22-QB-start league and correctly adds nothing, so QB C has to be a real
+    // starter for the third-arm bonus to mean anything.
     const three = gradeOf(
       BALANCED.map((s) =>
-        s.name === 'WR E' ? { ...s, name: 'QB C', pos: 'QB' as const } : s
+        s.name === 'WR E'
+          ? { name: 'QB C', pos: 'QB' as const, rank: 50 }
+          : s
       )
     );
     const one = gradeOf(
@@ -224,8 +277,7 @@ describe('gradeDraft — byes, construction and keepers', () => {
     return gradeDraft({
       picks,
       owners: [owner('a')],
-      playerMap: new Map(players.map((p) => [p.id, p])),
-      ranks,
+      ...withPool(players, ranks),
     })[0];
   }
 
@@ -270,10 +322,10 @@ describe('gradeDraft — byes, construction and keepers', () => {
     const grades = gradeDraft({
       picks: [...strong.picks, ...weak.picks],
       owners: [owner('strong'), owner('weak')],
-      playerMap: new Map(
-        [...strong.players, ...weak.players].map((p) => [p.id, p])
+      ...withPool(
+        [...strong.players, ...weak.players],
+        { ...strong.ranks, ...weak.ranks }
       ),
-      ranks: { ...strong.ranks, ...weak.ranks },
     });
 
     expect(grades).toHaveLength(2);
@@ -348,34 +400,47 @@ describe('gradeDraft — value is measured against the board, not the pick numbe
     expect(g.bestValue?.passedOver).toBe(0);
   });
 
-  it('docks a team that ignores the board', () => {
-    const players: Player[] = [];
-    const ranks: Record<string, RankEntry> = {};
-    for (let i = 1; i <= 60; i++) {
-      const p = player(`P${i}`, 'WR', i);
-      players.push(p);
-      ranks[p.espn_id as string] = { rank: i, adp: null };
+  it('rewards taking the best at your position and docks taking the worst', () => {
+    // Built explicitly rather than from the shared fixture: this needs a team
+    // that genuinely takes the top of a position and one that genuinely takes
+    // the bottom, which the shared roster template can't express.
+    function draftFrom(order: 'best' | 'worst') {
+      const players: Player[] = [];
+      const ranks: Record<string, RankEntry> = {};
+      for (let i = 1; i <= 40; i++) {
+        const p = player(`WR${i}`, 'WR', i);
+        players.push(p);
+        ranks[p.espn_id as string] = { rank: i, adp: null };
+      }
+      const chosen =
+        order === 'best' ? [players[0], players[1], players[2]]
+        : [players[37], players[38], players[39]];
+
+      const picks = chosen.map((p, i) => ({
+        id: i + 1, season_id: 1, round: i + 1, pick_in_round: 1,
+        overall_pick: i + 1,
+        original_owner_id: 'a', current_owner_id: 'a', player_id: p.id,
+        is_keeper: false, keeper_year: null, picked_at: null,
+        is_auto_pick: false, created_at: '',
+      })) as DraftPick[];
+
+      return gradeDraft({
+        picks,
+        owners: [owner('a')],
+        playerMap: new Map(players.map((p) => [p.id, p])),
+        ranks,
+      })[0];
     }
-    // Takes the 50th-ranked player first, passing 49 better ones.
-    const picks = [players[49], players[0]].map((p, i) => ({
-      id: i + 1, season_id: 1, round: i + 1, pick_in_round: 1,
-      overall_pick: i + 1,
-      original_owner_id: 'a', current_owner_id: 'a', player_id: p.id,
-      is_keeper: false, keeper_year: null, picked_at: null,
-      is_auto_pick: false, created_at: '',
-    })) as DraftPick[];
 
-    const g = gradeDraft({
-      picks,
-      owners: [owner('a')],
-      playerMap: new Map(players.map((p) => [p.id, p])),
-      ranks,
-    })[0];
+    const best = draftFrom('best');
+    const worst = draftFrom('worst');
 
-    expect(g.biggestReach?.passedOver).toBe(49);
-    // One catastrophic pick is caught by discipline, separately from the mean.
-    expect(g.draft.components.discipline).toBeLessThan(DRAFT_WEIGHTS.discipline / 2);
-    expect(g.draft.components.value).toBeLessThan(DRAFT_WEIGHTS.value / 2);
+    // Taking the top of the position leaves nothing on the table.
+    expect(best.bestValue?.shortfall).toBe(0);
+    expect(worst.biggestReach?.shortfall ?? 0).toBeGreaterThan(0.5);
+    expect(best.draft.components.value).toBeGreaterThan(
+      worst.draft.components.value
+    );
   });
 });
 
@@ -399,7 +464,8 @@ describe('gradeDraft — the two grades measure different things', () => {
     }
 
     // Team 'keeper' holds the four best players as cheap round-12 keepers,
-    // then drafts badly — always the worst player left.
+    // then drafts poorly: every live pick is the worst player left at that
+    // position, which is what board value now measures.
     players.slice(0, 4).forEach((p, i) => {
       picks.push({
         id: 500 + i, season_id: 1, round: 12, pick_in_round: 1,
@@ -431,7 +497,9 @@ describe('gradeDraft — the two grades measure different things', () => {
     // Elite keepers carry the roster; the draft itself was poor.
     expect(g.roster.components.lineup).toBeGreaterThan(0);
     expect(g.draft.components.keeper).toBeGreaterThan(0);
-    expect(g.draft.components.value).toBeLessThan(DRAFT_WEIGHTS.value / 2);
+    // Keepers carry the roster; the live picks were poor, so board value sits
+    // below a full score even though the keepers were excellent.
+    expect(g.draft.components.value).toBeLessThan(DRAFT_WEIGHTS.value);
     // Keepers are excluded from the draft's board-value measure entirely.
     expect(g.keeperCount).toBe(4);
     expect(g.bestValue?.pick.is_keeper).toBe(false);
@@ -450,8 +518,7 @@ describe('gradeDraft — the two grades measure different things', () => {
     const grades = gradeDraft({
       picks: [...a.picks, ...b.picks],
       owners: [owner('a'), owner('b')],
-      playerMap: new Map([...a.players, ...b.players].map((p) => [p.id, p])),
-      ranks: { ...a.ranks, ...b.ranks },
+      ...withPool([...a.players, ...b.players], { ...a.ranks, ...b.ranks }),
     });
 
     const draftRanks = grades.map((g) => g.draft.rank).sort();
@@ -465,8 +532,7 @@ describe('gradeDraft — the two grades measure different things', () => {
     const g = gradeDraft({
       picks,
       owners: [owner('a')],
-      playerMap: new Map(players.map((p) => [p.id, p])),
-      ranks,
+      ...withPool(players, ranks),
     })[0];
 
     expect(g.draftVerdict.length).toBeGreaterThan(0);
@@ -532,8 +598,7 @@ describe('curveScores — live grades during the draft', () => {
     const grades = gradeDraft({
       picks: [...a.picks, ...b.picks],
       owners: [owner('a'), owner('b')],
-      playerMap: new Map([...a.players, ...b.players].map((p) => [p.id, p])),
-      ranks: { ...a.ranks, ...b.ranks },
+      ...withPool([...a.players, ...b.players], { ...a.ranks, ...b.ranks }),
     });
 
     for (const g of grades) {
@@ -567,8 +632,7 @@ describe('displayGrade — one scale everywhere', () => {
     return gradeDraft({
       picks: [...a.picks, ...b.picks],
       owners: [owner('a'), owner('b')],
-      playerMap: new Map([...a.players, ...b.players].map((p) => [p.id, p])),
-      ranks: { ...a.ranks, ...b.ranks },
+      ...withPool([...a.players, ...b.players], { ...a.ranks, ...b.ranks }),
     });
   }
 

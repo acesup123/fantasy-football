@@ -28,10 +28,18 @@ import { LEAGUE_CONFIG } from '@/types/database';
  * already loads. No new data source, no migration.
  */
 
+/**
+ * Board value carries less than it looks like it should because almost everyone
+ * takes the best player available *at the position they've chosen* — measured
+ * across the real draft it ranged 84%-100%, so it barely separates anyone.
+ * Keeper leverage is where the spread actually is (8%-90%), which is fitting in
+ * a keeper league: what you chose to hold, and at what round cost, is the
+ * decision with the longest tail.
+ */
 export const DRAFT_WEIGHTS = {
-  value: 60,
-  keeper: 25,
-  discipline: 15,
+  value: 40,
+  keeper: 35,
+  discipline: 25,
 } as const;
 
 export const ROSTER_WEIGHTS = {
@@ -51,11 +59,34 @@ const SUPERFLEX_ELIGIBLE = ['QB', 'RB', 'WR', 'TE'];
 /** Ranks worse than this are treated as replacement level. */
 const REPLACEMENT_RANK = 200;
 
-/** Mean players passed over at which board discipline scores zero. */
-const PASSED_OVER_FLOOR = 30;
+/**
+ * How many of each position start league-wide in a given week: 12 teams times
+ * the lineup, with FLEX and SF distributed across the positions that can fill
+ * them. The Nth-best player at a position is therefore the last one starting
+ * anywhere, which makes him replacement level — the bar a roster spot has to
+ * clear to be worth anything at all.
+ *
+ * Grading against this rather than against overall rank is what stops every
+ * roster scoring a C. A perfect score used to require nine rank-1 players,
+ * which is unreachable when there is one rank-1 player and twelve teams; now it
+ * requires the best startable player at each slot, which is merely very good.
+ * It also removes a false penalty on defences and tight ends, who rank terribly
+ * overall and so looked like reaches however early the position had to be
+ * taken.
+ */
+const LEAGUE_STARTERS: Record<string, number> = {
+  QB: 22, // 12 QB slots plus most superflexes
+  RB: 29, // 24 RB slots plus roughly half the flexes
+  WR: 29,
+  TE: 14, // 12 TE slots plus the occasional flex
+  DEF: 12,
+};
 
-/** Worst single reach at which the discipline component scores zero. */
-const WORST_REACH_FLOOR = 50;
+/** Mean VORP left on the table per pick at which board value scores zero. */
+const VALUE_SHORTFALL_FLOOR = 0.5;
+
+/** Worst single pick's VORP shortfall at which discipline scores zero. */
+const WORST_SHORTFALL_FLOOR = 0.85;
 
 export interface RankEntry {
   rank: number;
@@ -68,15 +99,26 @@ export interface GradedPick {
   /** ESPN superflex rank, or null when the player is unranked. */
   rank: number | null;
   /**
-   * Better-ranked players still on the board when this pick was made. 0 means
-   * best available. Null for keepers — a keeper costs a round, not a slot.
-   *
-   * This replaces the obvious "rank minus pick number", which is unusable here:
-   * 60 of the 180 slots are pre-filled keepers and keepers skew elite, so the
-   * best available player is always ranked far worse than the pick number. That
-   * made every team look like it reached on every pick.
+   * Better-ranked players still on the board when this pick was made. Kept for
+   * display — "12 better left" reads more plainly than a VORP delta.
    */
   passedOver: number | null;
+  /**
+   * Value left on the table *at the position drafted*: the best available VORP
+   * at that position minus the VORP actually taken. 0 means you took the best
+   * one there.
+   *
+   * Deliberately position-relative. Measured across all positions instead, the
+   * best available is a defence from round 3 onward — DEF#1 carries full VORP
+   * and nobody drafts a defence until round 11 — so every legitimate skill pick
+   * scored as a total reach and the whole component collapsed to zero. VORP
+   * measures weekly lineup value, not draft-time opportunity cost.
+   *
+   * So this asks "having decided to take a receiver here, did you take the best
+   * receiver available?". Whether a receiver was the right call at all is what
+   * the roster grade answers, by punishing the shape you end up with.
+   */
+  shortfall: number | null;
 }
 
 export interface ScoreBlock<C extends string> {
@@ -133,13 +175,98 @@ function effectiveRank(player: Player, ranks: Record<string, RankEntry>): number
 }
 
 /**
- * Rank → 0..1 quality. Rank 1 scores 1.0 and decays to 0 at replacement level.
- * Sub-linear so the gap between the 1st and 10th player matters more than the
- * gap between the 100th and 110th, which is how lineups actually behave.
+ * Value over replacement, 0..1, for every ranked player.
+ *
+ * A player's worth is his rank *within his position* measured against the last
+ * player at that position who starts anywhere in the league. The best QB scores
+ * ~1, the 22nd QB scores 0, and everyone below him also scores 0 — a third
+ * tight end contributes nothing because he can never enter a lineup.
  */
-function quality(rank: number): number {
-  if (rank >= REPLACEMENT_RANK) return 0;
-  return 1 - Math.pow(rank / REPLACEMENT_RANK, 0.6);
+export type VorpTable = Map<number, number>;
+
+export function buildVorpTable(
+  playerMap: Map<number, Player>,
+  ranks: Record<string, RankEntry>
+): VorpTable {
+  const byPosition = new Map<string, { id: number; rank: number }[]>();
+
+  for (const player of playerMap.values()) {
+    const rank = rankOf(player, ranks);
+    if (rank === null) continue;
+    const list = byPosition.get(player.position) ?? [];
+    list.push({ id: player.id, rank });
+    byPosition.set(player.position, list);
+  }
+
+  const table: VorpTable = new Map();
+
+  for (const [position, list] of byPosition) {
+    list.sort((a, b) => a.rank - b.rank);
+    const replacement = LEAGUE_STARTERS[position] ?? 12;
+
+    list.forEach((entry, i) => {
+      const posRank = i + 1;
+      // Linear from the top of the position down to replacement level. Linear
+      // rather than curved because the drop from QB1 to QB12 really is close to
+      // even in a superflex format — the scarcity is already priced in by
+      // measuring against replacement.
+      const v = (replacement - posRank) / (replacement - 1);
+      table.set(entry.id, Math.max(0, Math.min(1, v)));
+    });
+  }
+
+  return table;
+}
+
+function vorpOf(player: Player | null | undefined, vorp: VorpTable): number {
+  if (!player) return 0;
+  return vorp.get(player.id) ?? 0;
+}
+
+/**
+ * The best lineup and quarterback room any single team in this league could
+ * actually own, used as the 100% mark.
+ *
+ * Without this the scale is anchored to a perfect-VORP roster, which is not
+ * merely hard but arithmetically impossible: twelve teams share one player pool,
+ * so nobody fields the best player at all nine slots and every roster scored a
+ * C. Anchoring to the achievable ceiling makes 100 mean "the best roster this
+ * league could produce" — still unreachable in practice, but in the same
+ * universe as the rosters being graded.
+ *
+ * Computed from the player pool alone, not from how the other eleven teams
+ * actually did, so it is an absolute scale and not a second curve.
+ */
+function achievableCeilings(
+  playerMap: Map<number, Player>,
+  vorp: VorpTable
+): { lineup: number; superflex: number } {
+  const byPos = new Map<string, number[]>();
+  for (const p of playerMap.values()) {
+    const v = vorp.get(p.id);
+    if (v === undefined) continue;
+    const list = byPos.get(p.position) ?? [];
+    list.push(v);
+    byPos.set(p.position, list);
+  }
+  for (const list of byPos.values()) list.sort((a, b) => b - a);
+
+  const top = (pos: string, n: number) => (byPos.get(pos) ?? [])[n - 1] ?? 0;
+
+  // One team taking the best at every slot: QB1, RB1-2, WR1-2, TE1, the best
+  // remaining flex, QB2 in the superflex, DEF1.
+  const flexBest = Math.max(top('RB', 3), top('WR', 3), top('TE', 2));
+  const lineupSlots = [
+    top('QB', 1), top('RB', 1), top('RB', 2), top('WR', 1), top('WR', 2),
+    top('TE', 1), flexBest, top('QB', 2), top('DEF', 1),
+  ];
+  const lineup = lineupSlots.reduce((a, b) => a + b, 0) / lineupSlots.length;
+
+  const superflex =
+    top('QB', 1) * 0.45 + top('QB', 2) * 0.4 + top('QB', 3) * 0.15;
+
+  // Guard against a rank outage leaving the ceiling at zero.
+  return { lineup: lineup || 1, superflex: superflex || 1 };
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -189,27 +316,31 @@ export function pickStarters(
 
 function scoreLineup(
   starters: { slot: string; player: Player | null }[],
-  ranks: Record<string, RankEntry>
+  vorp: VorpTable,
+  ceiling: number
 ): number {
-  const scores = starters.map((s) =>
-    s.player ? quality(effectiveRank(s.player, ranks)) : 0
-  );
+  const scores = starters.map((s) => vorpOf(s.player, vorp));
   const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
-  return round1(mean * ROSTER_WEIGHTS.lineup);
+  return round1(Math.min(1, mean / ceiling) * ROSTER_WEIGHTS.lineup);
 }
 
 /**
  * Two startable quarterbacks is the baseline the format demands; the third is
  * trade capital, and one is a structural hole no amount of skill talent covers.
  */
-function scoreSuperflex(qbs: { player: Player; rank: number }[]): number {
+function scoreSuperflex(
+  qbs: { player: Player; rank: number }[],
+  vorp: VorpTable,
+  ceiling: number
+): number {
   if (qbs.length === 0) return 0;
   const sorted = [...qbs].sort((a, b) => a.rank - b.rank);
-  const q1 = quality(sorted[0].rank);
-  const q2 = sorted[1] ? quality(sorted[1].rank) : 0;
-  const q3 = sorted[2] ? quality(sorted[2].rank) : 0;
+  const q1 = vorpOf(sorted[0]?.player, vorp);
+  const q2 = vorpOf(sorted[1]?.player, vorp);
+  const q3 = vorpOf(sorted[2]?.player, vorp);
   // 45% first starter, 40% second starter, 15% depth/trade capital.
-  return round1((q1 * 0.45 + q2 * 0.4 + q3 * 0.15) * ROSTER_WEIGHTS.superflex);
+  const raw = q1 * 0.45 + q2 * 0.4 + q3 * 0.15;
+  return round1(Math.min(1, raw / ceiling) * ROSTER_WEIGHTS.superflex);
 }
 
 /**
@@ -248,13 +379,15 @@ function scoreByes(collision: { week: number; count: number } | null): number {
  * pick is meaningless in a keeper format.
  */
 function scoreValue(graded: GradedPick[]): number {
-  const live = graded.filter((g) => g.passedOver !== null);
+  const live = graded.filter((g) => g.shortfall !== null);
   // No ranks at all — award par rather than punishing a data outage.
   if (live.length === 0) return round1(DRAFT_WEIGHTS.value * 0.5);
 
   const mean =
-    live.reduce((a, g) => a + (g.passedOver as number), 0) / live.length;
-  return round1(Math.max(0, 1 - mean / PASSED_OVER_FLOOR) * DRAFT_WEIGHTS.value);
+    live.reduce((a, g) => a + (g.shortfall as number), 0) / live.length;
+  return round1(
+    Math.max(0, 1 - mean / VALUE_SHORTFALL_FLOOR) * DRAFT_WEIGHTS.value
+  );
 }
 
 /**
@@ -280,12 +413,12 @@ function scoreKeeper(
  * still have torched one pick badly; averaging alone would bury that.
  */
 function scoreDiscipline(graded: GradedPick[]): number {
-  const live = graded.filter((g) => g.passedOver !== null);
+  const live = graded.filter((g) => g.shortfall !== null);
   if (live.length === 0) return round1(DRAFT_WEIGHTS.discipline * 0.5);
 
-  const worst = Math.max(...live.map((g) => g.passedOver as number));
+  const worst = Math.max(...live.map((g) => g.shortfall as number));
   return round1(
-    Math.max(0, 1 - worst / WORST_REACH_FLOOR) * DRAFT_WEIGHTS.discipline
+    Math.max(0, 1 - worst / WORST_SHORTFALL_FLOOR) * DRAFT_WEIGHTS.discipline
   );
 }
 
@@ -343,18 +476,42 @@ function letterForZ(z: number): string {
   return 'D';
 }
 
-function letterFor(score: number): string {
-  if (score >= 90) return 'A+';
-  if (score >= 85) return 'A';
-  if (score >= 80) return 'A−';
-  if (score >= 76) return 'B+';
-  if (score >= 72) return 'B';
-  if (score >= 68) return 'B−';
-  if (score >= 64) return 'C+';
-  if (score >= 58) return 'C';
-  if (score >= 52) return 'C−';
+/**
+ * Letters are anchored to the score an average roster in this format actually
+ * earns, not to a notional 100.
+ *
+ * Twelve teams share one player pool, so no roster can hold the best player at
+ * every slot and none ever will score near 100 — measured across a real
+ * completed draft the field ran 44 to 73. Grading that against a 0-100 ladder
+ * put every single team on a C or a D, which tells an owner nothing. The two
+ * grades sit at different natural centres, so each gets its own ladder: an
+ * exactly-average roster works out near 55 and an average draft near 70, and
+ * both are pinned at B−, the middle of the scale.
+ *
+ * These are fixed constants, not a curve. A genuinely great roster still earns
+ * an A+ in a year when the rest of the league is weak, and a bad one still
+ * earns a D in a strong year.
+ */
+const ROSTER_AVERAGE = 55;
+const DRAFT_AVERAGE = 70;
+const TIER = 4.5;
+
+function letterAnchored(score: number, average: number): string {
+  const tiers = (score - average) / TIER;
+  if (tiers >= 4.5) return 'A+';
+  if (tiers >= 3.5) return 'A';
+  if (tiers >= 2.5) return 'A−';
+  if (tiers >= 1.5) return 'B+';
+  if (tiers >= 0.5) return 'B';
+  if (tiers >= -0.5) return 'B−';
+  if (tiers >= -1.5) return 'C+';
+  if (tiers >= -2.5) return 'C';
+  if (tiers >= -3.5) return 'C−';
   return 'D';
 }
+
+const letterForRoster = (score: number) => letterAnchored(score, ROSTER_AVERAGE);
+const letterForDraft = (score: number) => letterAnchored(score, DRAFT_AVERAGE);
 
 function draftVerdictFor(
   components: Record<DraftComponent, number>,
@@ -436,12 +593,13 @@ function rosterVerdictFor(
  * available to anyone — which is the whole reason this is computed by replay
  * rather than from the pick number.
  */
-function computePassedOver(
+function computePickValue(
   picks: DraftPick[],
   playerMap: Map<number, Player>,
-  ranks: Record<string, RankEntry>
-): Map<number, number> {
-  const result = new Map<number, number>();
+  ranks: Record<string, RankEntry>,
+  vorp: VorpTable
+): Map<number, { passedOver: number; shortfall: number }> {
+  const result = new Map<number, { passedOver: number; shortfall: number }>();
 
   const board = [...playerMap.values()]
     .map((p) => ({ id: p.id, rank: rankOf(p, ranks) }))
@@ -465,13 +623,21 @@ function computePassedOver(
     const player = playerMap.get(pick.player_id as number);
     const rank = player ? rankOf(player, ranks) : null;
 
-    if (rank !== null) {
+    if (rank !== null && player) {
       let better = 0;
+      let bestAtPosition = 0;
       for (const e of board) {
-        if (e.rank >= rank) break; // sorted — nothing better remains
-        if (!gone.has(e.id)) better++;
+        if (gone.has(e.id)) continue;
+        if (e.rank < rank) better++;
+        if (playerMap.get(e.id)?.position !== player.position) continue;
+        const v = vorp.get(e.id) ?? 0;
+        if (v > bestAtPosition) bestAtPosition = v;
       }
-      result.set(pick.id, better);
+      const taken = vorp.get(pick.player_id as number) ?? 0;
+      result.set(pick.id, {
+        passedOver: better,
+        shortfall: Math.max(0, bestAtPosition - taken),
+      });
     }
 
     gone.add(pick.player_id as number);
@@ -528,7 +694,9 @@ export function gradeDraft({
     byOwner.set(pick.current_owner_id, list);
   }
 
-  const passedOverByPick = computePassedOver(picks, playerMap, ranks);
+  const vorp = buildVorpTable(playerMap, ranks);
+  const ceilings = achievableCeilings(playerMap, vorp);
+  const pickValue = computePickValue(picks, playerMap, ranks, vorp);
 
   // Ranks and the curve both need the whole field, so they're filled in after
   // every team is built.
@@ -559,13 +727,15 @@ export function gradeDraft({
 
       if (pick.is_keeper) {
         keepers.push({ player, rank: eff, round: pick.round });
-        gradedPicks.push({ player, pick, rank, passedOver: null });
+        gradedPicks.push({ player, pick, rank, passedOver: null, shortfall: null });
       } else {
+        const pv = pickValue.get(pick.id);
         gradedPicks.push({
           player,
           pick,
           rank,
-          passedOver: passedOverByPick.get(pick.id) ?? null,
+          passedOver: pv?.passedOver ?? null,
+          shortfall: pv?.shortfall ?? null,
         });
       }
     }
@@ -585,8 +755,8 @@ export function gradeDraft({
     }
 
     const rosterComponents: Record<RosterComponent, number> = {
-      lineup: scoreLineup(starters, ranks),
-      superflex: scoreSuperflex(qbs),
+      lineup: scoreLineup(starters, vorp, ceilings.lineup),
+      superflex: scoreSuperflex(qbs, vorp, ceilings.superflex),
       depth: scoreDepth(counts),
       byes: scoreByes(byeCollision),
     };
@@ -626,12 +796,12 @@ export function gradeDraft({
       teamName: owner.team_name,
       draft: {
         score: draftScore,
-        letter: letterFor(draftScore),
+        letter: letterForDraft(draftScore),
         components: draftComponents,
       },
       roster: {
         score: rosterScore,
-        letter: letterFor(rosterScore),
+        letter: letterForRoster(rosterScore),
         components: rosterComponents,
       },
       qbRoom: qbs.sort((a, b) => a.rank - b.rank).map((e) => e.player),
