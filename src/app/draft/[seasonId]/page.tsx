@@ -267,7 +267,13 @@ export default function DraftPage() {
 
   const currentPickNumber = season?.current_pick_number ?? 1;
   const currentPick = picks.find((p) => p.overall_pick === currentPickNumber);
-  const nextPick = picks.find((p) => p.overall_pick === currentPickNumber + 1);
+  // On deck is the next slot an owner will actually pick, not overall_pick + 1:
+  // keeper slots are pre-filled at initialization, and after an undo the slots
+  // just past the pointer may already hold picks.
+  const nextPick = picks.find(
+    (p) =>
+      p.overall_pick > currentPickNumber && !p.is_keeper && p.player_id === null
+  );
   const isMyTurn = currentPick?.current_owner_id === currentOwnerId;
 
 
