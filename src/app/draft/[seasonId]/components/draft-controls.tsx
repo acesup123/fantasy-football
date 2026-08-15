@@ -13,6 +13,13 @@ interface DraftControlsProps {
   seasonId?: number;
   /** Only the commissioner may pause or resume. */
   canControlClock?: boolean;
+  /**
+   * The pick "undo" would reverse — the most recent one. Null when the draft
+   * has no live picks yet, which hides the control entirely.
+   */
+  undoTarget?: { overallPick: number; playerName: string; teamName: string } | null;
+  /** Reverse the pick above. Commissioner only, same as the clock controls. */
+  onUndo?: () => Promise<void> | void;
 }
 
 export function DraftControls({
@@ -23,11 +30,17 @@ export function DraftControls({
   onNextPick,
   seasonId,
   canControlClock = false,
+  undoTarget = null,
+  onUndo,
 }: DraftControlsProps) {
   const [timeLeft, setTimeLeft] = useState(timerSeconds);
   const [isPaused, setIsPaused] = useState(false);
   const [clockSynced, setClockSynced] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Undo asks for a second click. It reverses someone else's pick in front of
+  // the whole league, and the button sits next to the clock controls.
+  const [undoArmed, setUndoArmed] = useState(false);
+  const [undoing, setUndoing] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   // Server deadline in *local* epoch ms, corrected for this machine's clock skew.
   const deadlineRef = useRef<number | null>(null);
@@ -75,6 +88,25 @@ export function DraftControls({
       // Ignore — the next poll will reconcile.
     }
     setBusy(false);
+  };
+
+  // Disarm if the target moves underneath the confirm — another pick landing
+  // while the button is armed would otherwise reverse the wrong one.
+  useEffect(() => {
+    setUndoArmed(false);
+  }, [undoTarget?.overallPick]);
+
+  const runUndo = async () => {
+    if (!onUndo) return;
+    setUndoing(true);
+    try {
+      await onUndo();
+    } finally {
+      // Disarm either way. On success the target has changed; on failure the
+      // page surfaces the error and the commissioner can start over.
+      setUndoing(false);
+      setUndoArmed(false);
+    }
   };
 
   // Reset timer when pick changes (local fallback only)
@@ -241,6 +273,37 @@ export function DraftControls({
               >
                 reset clock
               </button>
+            )}
+
+            {/* Undo the last pick. Commissioner only, and never shown when
+                there is nothing to reverse. */}
+            {canControlClock && onUndo && undoTarget && (
+              undoArmed ? (
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={runUndo}
+                    disabled={undoing}
+                    className={`btn-danger text-[10px] px-2 py-1 ${undoing ? "opacity-50" : ""}`}
+                  >
+                    {undoing ? "..." : `Undo ${undoTarget.playerName}`}
+                  </button>
+                  <button
+                    onClick={() => setUndoArmed(false)}
+                    disabled={undoing}
+                    className="text-[10px] text-muted hover:text-foreground px-1"
+                  >
+                    cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setUndoArmed(true)}
+                  title={`Reverse pick #${undoTarget.overallPick} — ${undoTarget.playerName} to ${undoTarget.teamName}`}
+                  className="text-[10px] text-muted hover:text-danger"
+                >
+                  ↩ undo last pick
+                </button>
+              )
             )}
           </div>
         </div>

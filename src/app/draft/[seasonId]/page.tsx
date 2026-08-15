@@ -12,6 +12,7 @@ import { LEAGUE_CONFIG } from "@/types/database";
 import { createClient } from "@/lib/supabase/client";
 import { subscribeToDraft } from "@/lib/draft/subscriptions";
 import { buildOwnerRosters } from "@/lib/draft/roster-requirements";
+import { findLastLivePick } from "@/lib/draft/undo";
 import { useAuth } from "@/components/auth/auth-provider";
 
 // ============================================================
@@ -383,6 +384,64 @@ export default function DraftPage() {
     [canPickNow, currentPick, season, currentPickNumber]
   );
 
+  // ---- Undo the last pick (commissioner only) ----
+  //
+  // The same rule the API uses, so the button names the pick the server will
+  // actually reverse rather than guessing at the highest-numbered one.
+  const lastLivePick = useMemo(() => findLastLivePick(picks), [picks]);
+
+  const undoTarget = useMemo(() => {
+    if (!isCommissioner || !lastLivePick?.player_id) return null;
+    return {
+      overallPick: lastLivePick.overall_pick,
+      playerName: playerMap.get(lastLivePick.player_id)?.name ?? "this pick",
+      teamName: ownerMap.get(lastLivePick.current_owner_id)?.team_name ?? "unknown team",
+    };
+  }, [isCommissioner, lastLivePick, playerMap, ownerMap]);
+
+  const undoLastPick = useCallback(async () => {
+    if (!season || !lastLivePick) return;
+    setPickError(null);
+
+    try {
+      const res = await fetch("/api/draft/undo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          season_id: season.id,
+          // Name the slot explicitly. If a pick lands between the render and
+          // the click, the server rejects the stale target instead of
+          // reversing whatever happens to be newest by then.
+          overall_pick: lastLivePick.overall_pick,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setPickError(data.error ?? "Failed to undo the pick");
+        return;
+      }
+
+      // Realtime also fires for both of these, but update straight away so the
+      // player is back in the pool the moment the button resolves.
+      setPicks((prev) =>
+        prev.map((p) =>
+          p.overall_pick === lastLivePick.overall_pick
+            ? { ...p, player_id: null, picked_at: null, is_auto_pick: false }
+            : p
+        )
+      );
+      setSeason((prev) =>
+        prev
+          ? { ...prev, current_pick_number: data.on_the_clock, draft_status: "drafting" }
+          : prev
+      );
+    } catch {
+      setPickError("Network error — the pick was not undone");
+    }
+  }, [season, lastLivePick]);
+
   // ---- Use demo data as fallback ----
   const useDemoData =
     !loading && !season && !error;
@@ -534,6 +593,8 @@ export default function DraftPage() {
         seasonId={season?.id}
         canControlClock={isCommissioner}
         onNextPick={displayNextPick}
+        undoTarget={season ? undoTarget : null}
+        onUndo={undoLastPick}
       />
 
       {/* Main layout. The board sits beside the pool; the rosters view takes
