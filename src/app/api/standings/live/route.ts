@@ -54,7 +54,8 @@ export async function GET(request: Request) {
   const year = parseInt(searchParams.get('year') ?? '') || getCurrentNFLSeason();
 
   try {
-    const league = await espnFetch(year, ['mTeam']);
+    // mSettings carries scheduleSettings.divisions, needed for division names
+    const league = await espnFetch(year, ['mTeam', 'mSettings']);
 
     if (!league.teams?.length) {
       return NextResponse.json(

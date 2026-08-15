@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildStandings,
   compareStandings,
+  getDivisionNames,
   getCurrentNFLSeason,
   getOwnerName,
   isSeasonComplete,
@@ -129,6 +130,79 @@ describe("buildStandings", () => {
     const rows = buildStandings({ status: completeStatus, teams: [{ id: 1 }] }, 2025);
     expect(rows[0].wins).toBe(0);
     expect(rows[0].pointsFor).toBe(0);
+  });
+});
+
+describe("getDivisionNames", () => {
+  it("maps division ids to names from scheduleSettings", () => {
+    const map = getDivisionNames({
+      settings: {
+        scheduleSettings: {
+          divisions: [
+            { id: 1, name: "Division 1", size: 6 },
+            { id: 2, name: "Division 2", size: 6 },
+          ],
+        },
+      },
+    });
+    expect(map.get(1)).toBe("Division 1");
+    expect(map.get(2)).toBe("Division 2");
+  });
+
+  it("returns an empty map without the mSettings view", () => {
+    // The sync must request mSettings; without it divisions are simply absent
+    // rather than throwing.
+    expect(getDivisionNames({ teams: [] }).size).toBe(0);
+    expect(getDivisionNames(null).size).toBe(0);
+  });
+
+  it("skips malformed division entries", () => {
+    const map = getDivisionNames({
+      settings: { scheduleSettings: { divisions: [{ id: "x", name: 1 }, { id: 3 }] } },
+    });
+    expect(map.size).toBe(0);
+  });
+});
+
+describe("buildStandings divisions", () => {
+  const league = {
+    status: completeStatus,
+    settings: {
+      scheduleSettings: {
+        divisions: [
+          { id: 1, name: "Division 1", size: 6 },
+          { id: 2, name: "Division 2", size: 6 },
+        ],
+      },
+    },
+    teams: [
+      {
+        id: 8,
+        divisionId: 1,
+        playoffSeed: 1,
+        rankCalculatedFinal: 1,
+        record: {
+          overall: { wins: 11, losses: 3, ties: 0, pointsFor: 1873, pointsAgainst: 1615 },
+          division: { wins: 8, losses: 2, ties: 0 },
+        },
+      },
+      { id: 2, playoffSeed: 12, record: { overall: { wins: 4, losses: 10, ties: 0 } } },
+    ],
+  };
+
+  it("attaches division id, name and in-division record", () => {
+    const sal = buildStandings(league, 2025).find((r) => r.espnTeamId === 8)!;
+    expect(sal.divisionId).toBe(1);
+    expect(sal.divisionName).toBe("Division 1");
+    expect(sal.divisionWins).toBe(8);
+    expect(sal.divisionLosses).toBe(2);
+  });
+
+  it("nulls division fields for a team with no divisionId or division record", () => {
+    const joel = buildStandings(league, 2025).find((r) => r.espnTeamId === 2)!;
+    expect(joel.divisionId).toBeNull();
+    expect(joel.divisionName).toBeNull();
+    expect(joel.divisionWins).toBeNull();
   });
 });
 

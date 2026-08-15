@@ -67,6 +67,12 @@ export async function espnFetch(year: number, views: string[]): Promise<any> {
 export interface EspnStandingsRow {
   espnTeamId: number;
   ownerName: string | null;
+  divisionId: number | null;
+  divisionName: string | null;
+  /** In-division W/L/T. ESPN does not track points in this bucket. */
+  divisionWins: number | null;
+  divisionLosses: number | null;
+  divisionTies: number | null;
   wins: number;
   losses: number;
   ties: number;
@@ -93,13 +99,22 @@ export function buildStandings(league: any, year: number): EspnStandingsRow[] {
   // Same rule as the nightly sync: a projected final rank is not a result.
   const complete = isSeasonComplete(league);
 
+  const divisionNames = getDivisionNames(league);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows: EspnStandingsRow[] = (league.teams ?? []).map((team: any) => {
     const rec = team.record?.overall ?? {};
+    const div = team.record?.division ?? {};
+    const divisionId = typeof team.divisionId === "number" ? team.divisionId : null;
     const streakType = rec.streakType ?? null;
     return {
       espnTeamId: team.id,
       ownerName: getOwnerName(team.id, year),
+      divisionId,
+      divisionName: divisionId === null ? null : divisionNames.get(divisionId) ?? null,
+      divisionWins: typeof div.wins === "number" ? div.wins : null,
+      divisionLosses: typeof div.losses === "number" ? div.losses : null,
+      divisionTies: typeof div.ties === "number" ? div.ties : null,
       wins: rec.wins ?? 0,
       losses: rec.losses ?? 0,
       ties: rec.ties ?? 0,
@@ -117,6 +132,20 @@ export function buildStandings(league: any, year: number): EspnStandingsRow[] {
   });
 
   return rows.sort(compareStandings);
+}
+
+/**
+ * Division id -> name, from settings.scheduleSettings.divisions.
+ * Requires the mSettings view; returns an empty map without it.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function getDivisionNames(league: any): Map<number, string> {
+  const divisions = league?.settings?.scheduleSettings?.divisions ?? [];
+  const map = new Map<number, string>();
+  for (const d of divisions) {
+    if (typeof d?.id === "number" && typeof d?.name === "string") map.set(d.id, d.name);
+  }
+  return map;
 }
 
 /**

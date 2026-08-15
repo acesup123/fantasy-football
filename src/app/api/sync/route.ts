@@ -5,6 +5,7 @@ import {
   espnFetch,
   getCurrentNFLSeason,
   getOwnerName,
+  getDivisionNames,
   hasEspnCredentials,
   isSeasonComplete,
   rankOrNull,
@@ -98,10 +99,14 @@ export async function GET(request: Request) {
     // 1. SYNC STANDINGS
     // ============================================================
     log.push('Fetching standings...');
-    const standingsData = await espnFetch(year, ['mTeam', 'mStandings']);
+    // mSettings carries scheduleSettings.divisions, needed for division names
+    const standingsData = await espnFetch(year, ['mTeam', 'mStandings', 'mSettings']);
     const teams = standingsData.teams ?? [];
     const seasonComplete = isSeasonComplete(standingsData);
     log.push(seasonComplete ? 'Season is complete' : 'Season in progress');
+
+    const divisionNames = getDivisionNames(standingsData);
+    log.push(`Divisions: ${divisionNames.size || 'none configured'}`);
 
     if (teams.length === 0) {
       log.push('WARNING: No teams returned — ESPN cookies may have expired');
@@ -172,6 +177,10 @@ export async function GET(request: Request) {
 
       const streakType = rec.streakType ?? null;
 
+      // Divisions are per-season — a team can move between them year to year.
+      const divRec = team.record?.division ?? {};
+      const divisionId = typeof team.divisionId === 'number' ? team.divisionId : null;
+
       // Real upsert on the (season_id, owner_id) unique constraint. This used to
       // be delete-then-insert with neither error checked, so if the insert failed
       // — e.g. migration 002 had not been applied and the new columns did not
@@ -198,6 +207,11 @@ export async function GET(request: Request) {
             ? streakType
             : null,
         games_back: rec.gamesBack ?? null,
+        division_id: divisionId,
+        division_name: divisionId === null ? null : divisionNames.get(divisionId) ?? null,
+        division_wins: typeof divRec.wins === 'number' ? divRec.wins : null,
+        division_losses: typeof divRec.losses === 'number' ? divRec.losses : null,
+        division_ties: typeof divRec.ties === 'number' ? divRec.ties : null,
       }, { onConflict: 'season_id,owner_id' });
 
       if (upsertError) {

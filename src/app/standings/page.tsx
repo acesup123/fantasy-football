@@ -12,6 +12,11 @@ interface ResultRow {
   points_against: number;
   playoff_seed: number | null;
   final_rank: number | null;
+  division_id: number | null;
+  division_name: string | null;
+  division_wins: number | null;
+  division_losses: number | null;
+  division_ties: number | null;
   streak_length: number | null;
   streak_type: string | null;
   games_back: number | null;
@@ -38,7 +43,7 @@ export default async function StandingsPage({
     ? await supabase
         .from("season_results")
         .select(
-          "owner_id, wins, losses, ties, points_for, points_against, playoff_seed, final_rank, streak_length, streak_type, games_back, owners(name, team_name)"
+          "owner_id, wins, losses, ties, points_for, points_against, playoff_seed, final_rank, streak_length, streak_type, games_back, division_id, division_name, division_wins, division_losses, division_ties, owners(name, team_name)"
         )
         .eq("season_id", season.id)
     : { data: null };
@@ -61,6 +66,11 @@ export default async function StandingsPage({
           ? r.streak_type
           : null,
       gamesBack: r.games_back === null ? null : Number(r.games_back),
+      divisionId: r.division_id,
+      divisionName: r.division_name,
+      divisionWins: r.division_wins,
+      divisionLosses: r.division_losses,
+      divisionTies: r.division_ties,
     })
   );
 
