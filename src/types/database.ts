@@ -190,6 +190,19 @@ export type RosterSlot = keyof typeof ROSTER_SLOTS;
 // Required positions that MUST be drafted (can't skip)
 export const REQUIRED_POSITIONS = ['QB', 'RB', 'WR', 'TE', 'DEF'] as const;
 
+/**
+ * Minimum count of each position every roster must end the draft with —
+ * the starting lineup less the flex spots (FLEX and SF are covered by the
+ * RB/WR/TE/QB minimums). Enforced at pick time, not just checked at the end.
+ */
+export const ROSTER_MINIMUMS: Record<(typeof REQUIRED_POSITIONS)[number], number> = {
+  QB: 1,
+  RB: 2,
+  WR: 2,
+  TE: 1,
+  DEF: 1,
+};
+
 // League constants
 export const LEAGUE_CONFIG = {
   NUM_TEAMS: 12,

@@ -2,11 +2,14 @@
 
 import { useState, useMemo } from "react";
 import type { Player } from "@/types/database";
+import type { RequirementState } from "@/lib/draft/roster-requirements";
 
 interface PlayerPoolProps {
   players: Player[];
   isMyTurn: boolean;
   onPick: (playerId: number) => void;
+  /** null when nobody is signed in — no lockout to apply. */
+  requirements?: RequirementState | null;
 }
 
 const POSITIONS = ["ALL", "QB", "RB", "WR", "TE", "DEF"] as const;
@@ -28,10 +31,19 @@ const POS_FILTER_ACTIVE: Record<string, string> = {
   DEF: "bg-def text-white",
 };
 
-export function PlayerPool({ players, isMyTurn, onPick }: PlayerPoolProps) {
+export function PlayerPool({
+  players,
+  isMyTurn,
+  onPick,
+  requirements,
+}: PlayerPoolProps) {
   const [search, setSearch] = useState("");
   const [posFilter, setPosFilter] = useState<string>("ALL");
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
+
+  // Positions the roster minimums force this pick onto. Empty when there's slack.
+  const forcedPositions = requirements?.requiredNow ?? [];
+  const isLocked = isMyTurn && forcedPositions.length > 0;
 
   const filtered = useMemo(() => {
     let result = players;
@@ -53,6 +65,9 @@ export function PlayerPool({ players, isMyTurn, onPick }: PlayerPoolProps) {
   }, [players, posFilter, search]);
 
   const handlePick = (playerId: number) => {
+    const player = players.find((p) => p.id === playerId);
+    if (isLocked && player && !forcedPositions.includes(player.position)) return;
+
     if (confirmingId === playerId) {
       onPick(playerId);
       setConfirmingId(null);
@@ -111,6 +126,34 @@ export function PlayerPool({ players, isMyTurn, onPick }: PlayerPoolProps) {
             </button>
           ))}
         </div>
+
+        {/* Roster minimums that are now mandatory */}
+        {isLocked && (
+          <div className="rounded-md bg-danger/10 border border-danger/30 px-2.5 py-1.5">
+            <div className="text-[10px] font-bold uppercase tracking-wide text-danger">
+              Roster requirement
+            </div>
+            <p className="text-[10px] text-foreground/80 mt-0.5 leading-snug">
+              {requirements!.slotsRemaining}{" "}
+              {requirements!.slotsRemaining === 1 ? "pick" : "picks"} left and you
+              still need{" "}
+              {forcedPositions
+                .map((p) => `${requirements!.deficits[p]} ${p}`)
+                .join(", ")}
+              . Only {forcedPositions.join("/")} can be drafted.
+            </p>
+          </div>
+        )}
+
+        {/* Outstanding minimums, while there's still slack to fill them */}
+        {isMyTurn && !isLocked && requirements && requirements.totalDeficit > 0 && (
+          <div className="text-[10px] text-warning">
+            Still required:{" "}
+            {Object.entries(requirements.deficits)
+              .map(([pos, n]) => `${n} ${pos}`)
+              .join(", ")}
+          </div>
+        )}
       </div>
 
       {/* Player list */}
@@ -123,10 +166,19 @@ export function PlayerPool({ players, isMyTurn, onPick }: PlayerPoolProps) {
           </div>
         ) : (
           <div className="divide-y divide-border/20">
-            {filtered.map((player) => (
+            {filtered.map((player) => {
+              const blocked = isLocked && !forcedPositions.includes(player.position);
+              return (
               <div
                 key={player.id}
-                className="flex items-center gap-2 px-3 py-2 hover:bg-card-hover/50 transition-colors group"
+                className={`flex items-center gap-2 px-3 py-2 transition-colors group ${
+                  blocked ? "opacity-40" : "hover:bg-card-hover/50"
+                }`}
+                title={
+                  blocked
+                    ? `Roster requirement: you must draft ${forcedPositions.join("/")}`
+                    : undefined
+                }
               >
                 {/* Position badge */}
                 <span
@@ -152,17 +204,25 @@ export function PlayerPool({ players, isMyTurn, onPick }: PlayerPoolProps) {
                 {isMyTurn && (
                   <button
                     onClick={() => handlePick(player.id)}
+                    disabled={blocked}
                     className={`flex-shrink-0 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all ${
-                      confirmingId === player.id
-                        ? "btn-primary py-1 px-2.5 text-[10px]"
-                        : "opacity-0 group-hover:opacity-100 bg-accent/15 text-accent hover:bg-accent/25"
+                      blocked
+                        ? "bg-background/60 text-muted/60 cursor-not-allowed"
+                        : confirmingId === player.id
+                          ? "btn-primary py-1 px-2.5 text-[10px]"
+                          : "opacity-0 group-hover:opacity-100 bg-accent/15 text-accent hover:bg-accent/25"
                     }`}
                   >
-                    {confirmingId === player.id ? "Confirm" : "Draft"}
+                    {blocked
+                      ? "Locked"
+                      : confirmingId === player.id
+                        ? "Confirm"
+                        : "Draft"}
                   </button>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams } from "next/navigation";
-import { DraftBoard } from "./components/draft-board";
+import { DraftBoard, type BoardView } from "./components/draft-board";
 import { PlayerPool } from "./components/player-pool";
 import { DraftControls } from "./components/draft-controls";
 import { TradeModal } from "./components/trade-modal";
@@ -11,6 +11,7 @@ import type { DraftPick, Player, Owner, Season, Trade } from "@/types/database";
 import { LEAGUE_CONFIG } from "@/types/database";
 import { createClient } from "@/lib/supabase/client";
 import { subscribeToDraft } from "@/lib/draft/subscriptions";
+import { buildOwnerRosters } from "@/lib/draft/roster-requirements";
 import { useAuth } from "@/components/auth/auth-provider";
 
 // ============================================================
@@ -116,6 +117,7 @@ export default function DraftPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showTradeModal, setShowTradeModal] = useState(false);
+  const [boardView, setBoardView] = useState<BoardView>("board");
   const [recentPickId, setRecentPickId] = useState<number | undefined>(undefined);
   const [pickError, setPickError] = useState<string | null>(null);
 
@@ -284,6 +286,13 @@ export default function DraftPage() {
     () => new Map(players.map((p) => [p.id, p])),
     [players]
   );
+
+  // What my roster still owes the minimums. Drives the pool's lockout so the
+  // API's rejection isn't the first time an owner hears about it.
+  const myRequirements = useMemo(() => {
+    if (!currentOwnerId) return null;
+    return buildOwnerRosters(picks, playerMap).get(currentOwnerId)?.requirements ?? null;
+  }, [picks, playerMap, currentOwnerId]);
 
   // ---- Make a pick (POST to API) ----
   const makePick = useCallback(
@@ -489,22 +498,41 @@ export default function DraftPage() {
         onNextPick={displayNextPick}
       />
 
-      {/* Main Layout: Board + Sidebar (Player Pool + Ticker) */}
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_380px] gap-4">
+      {/* Main layout. The board sits beside the pool; the rosters view takes
+          the full width — 12 columns of names need every pixel — and drops the
+          pool below it so drafting is still one scroll away. */}
+      {/* minmax(0,1fr) lets the board column shrink so all 12 teams fit. */}
+      <div
+        className={
+          boardView === "rosters"
+            ? "space-y-3"
+            : "grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-3"
+        }
+      >
         <DraftBoard
           picks={displayPicks}
           owners={displayOwners}
           playerMap={displayPlayerMap}
           currentPickNumber={currentPickNumber}
           recentPickId={recentPickId}
+          currentOwnerId={currentOwnerId}
+          view={boardView}
+          onViewChange={setBoardView}
         />
 
-        {/* Sidebar */}
-        <div className="space-y-4">
+        {/* Player pool + ticker — sidebar on the board, a row under the rosters */}
+        <div
+          className={
+            boardView === "rosters"
+              ? "grid grid-cols-1 xl:grid-cols-2 gap-3"
+              : "space-y-4"
+          }
+        >
           <PlayerPool
             players={displayAvailable}
             isMyTurn={displayIsMyTurn}
             onPick={makePick}
+            requirements={myRequirements}
           />
           <LiveTicker
             picks={displayPicks}

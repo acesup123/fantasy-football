@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireActingOwner } from "@/lib/api-auth";
+import { countRoster, validatePick } from "@/lib/draft/roster-requirements";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -94,7 +95,48 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 4. Update the draft pick
+    // 4. Every roster must end the draft with 1 QB, 2 RB, 2 WR, 1 TE, 1 DEF.
+    // Reject a pick that would leave more requirements outstanding than the
+    // owner has picks left to fill them — otherwise the shortfall only shows
+    // up at the end of the draft, when it can no longer be fixed.
+    const [{ data: pickedPlayer }, { data: ownerSlots }] = await Promise.all([
+      supabase.from("players").select("position").eq("id", player_id).single(),
+      supabase
+        .from("draft_picks")
+        .select("player_id, players(position)")
+        .eq("season_id", season_id)
+        .eq("current_owner_id", owner_id),
+    ]);
+
+    if (!pickedPlayer) {
+      return NextResponse.json({ error: "Player not found" }, { status: 404 });
+    }
+
+    if (ownerSlots) {
+      // The embedded relation comes back as an object for a to-one FK, but
+      // normalize both shapes — a silently-empty roster would read as "needs
+      // everything" and lock the owner out of their own board.
+      const filled = ownerSlots
+        .filter((s) => s.player_id !== null)
+        .flatMap((s) => {
+          const rel = s.players as unknown;
+          const row = Array.isArray(rel) ? rel[0] : rel;
+          const position = (row as { position?: string } | null)?.position;
+          return position ? [{ position }] : [];
+        });
+      const slotsRemaining = ownerSlots.filter((s) => s.player_id === null).length;
+
+      const check = validatePick(
+        countRoster(filled),
+        slotsRemaining,
+        pickedPlayer.position
+      );
+      if (!check.ok) {
+        return NextResponse.json({ error: check.error }, { status: 400 });
+      }
+    }
+
+    // 5. Update the draft pick
     const { error: updatePickErr } = await supabase
       .from("draft_picks")
       .update({
@@ -111,7 +153,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 5. Advance to the next slot that still needs a pick.
+    // 6. Advance to the next slot that still needs a pick.
     //
     // A blind +1 deadlocks the draft: 60 of the 180 slots are pre-filled
     // keepers, so the counter lands on one, every pick attempt there fails

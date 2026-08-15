@@ -1,4 +1,9 @@
 import type { Player, AutoDraftSettings, PositionRule } from '@/types/database';
+import {
+  countRoster,
+  getRequirementState,
+  missingPositions,
+} from './roster-requirements';
 
 interface AutoPickContext {
   availablePlayers: Player[];
@@ -45,9 +50,14 @@ export function getAutoPick(context: AutoPickContext): Player | null {
   // Check which positions are restricted this round
   const restrictedPositions = getRestrictedPositions(rules, rosterCounts, currentRound);
 
-  // Check if we need to fill required positions before draft ends
-  const roundsLeft = totalRounds - currentRound;
-  const mustFill = getMustFillPositions(rosterCounts, roundsLeft);
+  // Roster minimums that are still outstanding, and whether the picks left
+  // are all spoken for. `requiredNow` is a hard constraint — the pick API
+  // rejects anything outside it.
+  const slotsRemaining = totalRounds - currentRound + 1;
+  const requirements = getRequirementState(
+    Object.fromEntries(rosterCounts),
+    slotsRemaining
+  );
 
   // Build candidate list: filter available players
   let candidates = availablePlayers.filter((p) => {
@@ -61,6 +71,21 @@ export function getAutoPick(context: AutoPickContext): Player | null {
     return true;
   });
 
+  // Roster minimums outrank every preference: once the remaining picks are
+  // all needed, only those positions are draftable at all.
+  if (requirements.requiredNow.length > 0) {
+    const forced = availablePlayers.filter((p) =>
+      requirements.requiredNow.includes(p.position)
+    );
+    if (forced.length > 0) {
+      // Keep rule-based filtering only if it doesn't empty the pool.
+      const both = candidates.filter((p) =>
+        requirements.requiredNow.includes(p.position)
+      );
+      candidates = both.length > 0 ? both : forced;
+    }
+  }
+
   // If there are urgent needs, prioritize those positions
   if (urgentPositions.length > 0) {
     const urgentCandidates = candidates.filter((p) =>
@@ -71,10 +96,12 @@ export function getAutoPick(context: AutoPickContext): Player | null {
     }
   }
 
-  // If we must fill required positions soon, prioritize those
-  if (mustFill.length > 0 && roundsLeft <= mustFill.length + 1) {
+  // With one pick of slack left, lean toward the outstanding minimums so the
+  // last pick isn't forced onto whatever scraps remain at that position.
+  const stillMissing = Object.keys(requirements.deficits);
+  if (stillMissing.length > 0 && requirements.totalDeficit >= slotsRemaining - 1) {
     const mustFillCandidates = candidates.filter((p) =>
-      mustFill.includes(p.position)
+      stillMissing.includes(p.position)
     );
     if (mustFillCandidates.length > 0) {
       candidates = mustFillCandidates;
@@ -136,59 +163,12 @@ function getRestrictedPositions(
 }
 
 /**
- * Required positions not yet on the roster.
- * Every team MUST have: 1 QB, 1 TE, 1 DEF (plus RB/WR filled naturally).
- */
-function getMustFillPositions(
-  rosterCounts: Map<string, number>,
-  _roundsLeft: number
-): string[] {
-  const mustFill: string[] = [];
-
-  // Minimum required: 1 QB, 2 RB, 2 WR, 1 TE, 1 DEF
-  const minimums: Record<string, number> = {
-    QB: 1,
-    RB: 2,
-    WR: 2,
-    TE: 1,
-    DEF: 1,
-  };
-
-  for (const [pos, min] of Object.entries(minimums)) {
-    if ((rosterCounts.get(pos) ?? 0) < min) {
-      mustFill.push(pos);
-    }
-  }
-
-  return mustFill;
-}
-
-/**
  * Validate that a roster meets minimum position requirements.
  * Used to check if a draft is valid at completion.
  */
 export function validateRoster(
   roster: { position: string }[]
 ): { valid: boolean; missing: string[] } {
-  const counts = new Map<string, number>();
-  roster.forEach((p) => {
-    counts.set(p.position, (counts.get(p.position) ?? 0) + 1);
-  });
-
-  const missing: string[] = [];
-  const minimums: Record<string, number> = {
-    QB: 1,
-    RB: 2,
-    WR: 2,
-    TE: 1,
-    DEF: 1,
-  };
-
-  for (const [pos, min] of Object.entries(minimums)) {
-    if ((counts.get(pos) ?? 0) < min) {
-      missing.push(pos);
-    }
-  }
-
+  const missing = missingPositions(countRoster(roster));
   return { valid: missing.length === 0, missing };
 }

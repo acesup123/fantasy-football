@@ -4,6 +4,8 @@ import { useMemo } from "react";
 import type { DraftPick, Owner, Player } from "@/types/database";
 import { LEAGUE_CONFIG } from "@/types/database";
 import { formatPickLabel } from "@/lib/draft/snake-order";
+import { abbreviateName } from "@/lib/draft/roster-requirements";
+import { RosterGrid } from "./roster-grid";
 
 interface DraftBoardProps {
   picks: DraftPick[];
@@ -11,7 +13,13 @@ interface DraftBoardProps {
   playerMap: Map<number, Player>;
   currentPickNumber: number;
   recentPickId?: number; // ID of the most recently made pick (for animation)
+  currentOwnerId?: string;
+  /** Controlled by the page — the rosters view takes the full width. */
+  view: BoardView;
+  onViewChange: (view: BoardView) => void;
 }
+
+export type BoardView = "board" | "rosters";
 
 const POS_CELL_CLASS: Record<string, string> = {
   QB: "pick-cell-qb",
@@ -35,6 +43,9 @@ export function DraftBoard({
   playerMap,
   currentPickNumber,
   recentPickId,
+  currentOwnerId,
+  view,
+  onViewChange,
 }: DraftBoardProps) {
   const grid = useMemo(() => {
     const g: (DraftPick | null)[][] = Array.from(
@@ -65,25 +76,63 @@ export function DraftBoard({
   }, [picks]);
 
   return (
-    <div className="bg-card border border-border rounded-xl overflow-hidden shadow-lg">
+    <div className="bg-card border border-border rounded-xl overflow-hidden shadow-lg min-w-0">
       {/* Board header */}
-      <div className="px-4 py-2.5 border-b border-border bg-card-elevated/50 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-accent animate-pulse" />
-          <span className="text-xs font-bold uppercase tracking-widest text-accent">
-            Live Draft Board
+      <div className="px-3 py-2 border-b border-border bg-card-elevated/50 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-2 h-2 rounded-full bg-accent animate-pulse flex-shrink-0" />
+          <span className="text-xs font-bold uppercase tracking-widest text-accent truncate">
+            {view === "board" ? "Live Draft Board" : "Rosters by Position"}
           </span>
         </div>
-        <span className="text-xs text-muted font-mono">
-          {picks.filter((p) => p.player_id !== null).length} / {LEAGUE_CONFIG.NUM_TEAMS * LEAGUE_CONFIG.NUM_ROUNDS} picks
-        </span>
+
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <span className="text-xs text-muted font-mono hidden sm:inline">
+            {picks.filter((p) => p.player_id !== null).length} / {LEAGUE_CONFIG.NUM_TEAMS * LEAGUE_CONFIG.NUM_ROUNDS} picks
+          </span>
+
+          {/* View toggle */}
+          <div className="flex rounded-md bg-background/60 p-0.5">
+            {(["board", "rosters"] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => onViewChange(v)}
+                className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide transition-all ${
+                  view === v
+                    ? "bg-accent text-background"
+                    : "text-muted hover:text-foreground"
+                }`}
+              >
+                {v === "board" ? "Board" : "Rosters"}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[960px]">
+      {view === "rosters" ? (
+        <div className="p-2">
+          <RosterGrid
+            picks={picks}
+            owners={owners}
+            playerMap={playerMap}
+            currentOwnerId={currentOwnerId}
+          />
+        </div>
+      ) : (
+      // All 12 teams share the width — no horizontal scroll, scroll the page
+      // vertically through the 15 rounds instead.
+      <div>
+        <table className="w-full table-fixed">
+          <colgroup>
+            <col className="w-7" />
+            {Array.from({ length: LEAGUE_CONFIG.NUM_TEAMS }, (_, i) => (
+              <col key={i} />
+            ))}
+          </colgroup>
           <thead>
             <tr className="border-b border-border">
-              <th className="px-2 py-3 text-left text-[10px] text-muted font-semibold uppercase tracking-wider w-10 bg-card-elevated/30">
+              <th className="px-1 py-2 text-left text-[9px] text-muted font-semibold uppercase tracking-wider bg-card-elevated/30">
                 Rd
               </th>
               {Array.from({ length: LEAGUE_CONFIG.NUM_TEAMS }, (_, i) => {
@@ -100,14 +149,15 @@ export function DraftBoard({
                 return (
                   <th
                     key={i}
-                    className={`px-1 py-2 text-center transition-colors ${
+                    className={`px-0.5 py-1.5 text-center transition-colors ${
                       isCurrent ? "bg-accent/5" : ""
                     }`}
+                    title={owner?.team_name ?? undefined}
                   >
-                    <div className="text-xs font-bold truncate max-w-[90px]">
+                    <div className="text-[10px] font-bold truncate leading-tight">
                       {owner?.team_name ?? `Pick ${i + 1}`}
                     </div>
-                    <div className="text-[9px] text-muted mt-0.5">
+                    <div className="text-[9px] text-muted">
                       {count}/{LEAGUE_CONFIG.NUM_ROUNDS}
                     </div>
                   </th>
@@ -118,13 +168,13 @@ export function DraftBoard({
           <tbody>
             {grid.map((row, roundIdx) => (
               <tr key={roundIdx} className="border-b border-border/30">
-                <td className="px-2 py-1 text-center bg-card-elevated/30">
-                  <span className="text-[11px] text-muted/70 font-bold">
+                <td className="px-1 py-1 text-center bg-card-elevated/30">
+                  <span className="text-[10px] text-muted/70 font-bold">
                     {roundIdx + 1}
                   </span>
                 </td>
                 {row.map((pick, colIdx) => (
-                  <td key={colIdx} className="px-0.5 py-0.5">
+                  <td key={colIdx} className="px-px py-px">
                     <PickCell
                       pick={pick}
                       playerMap={playerMap}
@@ -139,6 +189,7 @@ export function DraftBoard({
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }
@@ -157,7 +208,7 @@ function PickCell({
   isRecentPick: boolean;
 }) {
   if (!pick) {
-    return <div className="h-14 rounded-md bg-background/20" />;
+    return <div className="h-11 rounded-md bg-background/20" />;
   }
 
   const player = pick.player_id ? playerMap.get(pick.player_id) : null;
@@ -168,23 +219,24 @@ function PickCell({
   if (!player) {
     return (
       <div
-        className={`pick-cell h-14 border flex items-center justify-center ${
+        className={`pick-cell h-11 border flex items-center justify-center overflow-hidden ${
           isCurrentPick
             ? "current-pick border-accent/60 bg-accent/8"
             : "border-transparent bg-background/15 hover:bg-background/25"
         }`}
+        title={isTraded && tradedFrom ? `via ${tradedFrom.team_name}` : undefined}
       >
-        <div className="text-center">
-          <div className="text-muted/50 font-mono text-[10px] font-semibold">
+        <div className="text-center min-w-0 px-0.5">
+          <div className="text-muted/50 font-mono text-[9px] font-semibold">
             {formatPickLabel(pick.round, pick.pick_in_round)}
           </div>
           {isTraded && tradedFrom && (
-            <div className="text-traded text-[8px] font-semibold mt-0.5">
+            <div className="text-traded text-[8px] font-semibold truncate">
               via {tradedFrom.team_name}
             </div>
           )}
           {isCurrentPick && (
-            <div className="text-accent text-[8px] font-bold uppercase mt-0.5 tracking-wider">
+            <div className="text-accent text-[8px] font-bold uppercase tracking-wider">
               Now
             </div>
           )}
@@ -199,39 +251,38 @@ function PickCell({
 
   return (
     <div
-      className={`pick-cell pick-cell-filled h-14 px-1.5 py-1 flex flex-col justify-center ${posClass} ${
+      className={`pick-cell pick-cell-filled h-11 px-1 py-0.5 flex flex-col justify-center overflow-hidden ${posClass} ${
         pick.is_keeper ? "pick-cell-keeper" : ""
       } ${isRecentPick ? "pick-just-made" : ""} ${
         isCurrentPick ? "current-pick" : ""
       }`}
+      title={`${player.name}${player.nfl_team ? ` · ${player.nfl_team}` : ""}${
+        isTraded && tradedFrom ? ` · via ${tradedFrom.team_name}` : ""
+      }`}
     >
-      {/* Player name + position */}
-      <div className="flex items-center gap-1 min-w-0">
-        <span
-          className={`text-[9px] font-black px-1 py-px rounded ${posText} bg-current/10 flex-shrink-0`}
-        >
-          {player.position}
-        </span>
-        <span className="text-[11px] font-semibold truncate leading-tight">
-          {player.name}
-        </span>
+      {/* Player name — abbreviated so it survives a 1/12-width column */}
+      <div className="text-[10px] font-semibold truncate leading-tight">
+        {abbreviateName(player.name)}
       </div>
 
-      {/* Second row: team + badges */}
-      <div className="flex items-center gap-1 mt-0.5 min-w-0">
+      {/* Second row: position, team, badges */}
+      <div className="flex items-center gap-0.5 min-w-0">
+        <span className={`text-[8px] font-black ${posText} flex-shrink-0`}>
+          {player.position}
+        </span>
         {player.nfl_team && (
-          <span className="text-[9px] text-muted font-medium">{player.nfl_team}</span>
-        )}
-        {pick.is_keeper && pick.keeper_year && (
-          <span className="keeper-badge">K{pick.keeper_year}</span>
-        )}
-        {isTraded && tradedFrom && (
-          <span className="text-[8px] text-traded/80 font-medium truncate">
-            via {tradedFrom.team_name}
+          <span className="text-[8px] text-muted font-medium truncate">
+            {player.nfl_team}
           </span>
         )}
+        {pick.is_keeper && pick.keeper_year && (
+          <span className="keeper-badge flex-shrink-0">K{pick.keeper_year}</span>
+        )}
+        {isTraded && tradedFrom && (
+          <span className="text-[8px] text-traded/80 font-bold flex-shrink-0">↔</span>
+        )}
         {pick.is_auto_pick && (
-          <span className="text-[8px] text-muted/50 italic">auto</span>
+          <span className="text-[8px] text-muted/50 italic flex-shrink-0">a</span>
         )}
       </div>
     </div>
