@@ -24,8 +24,23 @@ const POS_TEXT: Record<string, string> = {
 // Confetti in the position palette plus accent. Index math instead of
 // Math.random so a re-render mid-animation doesn't reshuffle the pieces.
 const CONFETTI_COLORS = ["--qb", "--rb", "--wr", "--te", "--def", "--accent"];
-const CONFETTI_COUNT = 28;
-const SHARD_COUNT = 14;
+const CONFETTI_COUNT = 44;
+const SHARD_COUNT = 22;
+const SHARD_COUNT_2 = 16;
+
+// Debris that flies out of the blast and falls under gravity. Golden-angle
+// scatter so it looks organic while staying deterministic across renders.
+const EMBERS = Array.from({ length: 20 }, (_, i) => {
+  const angle = (i * 137.5 * Math.PI) / 180;
+  const dist = 120 + (i % 5) * 45;
+  return {
+    dx: Math.round(Math.cos(angle) * dist),
+    dy: Math.round(Math.sin(angle) * dist * 0.8),
+    size: 5 + (i % 3) * 2,
+    color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+    delay: (i % 4) * 60,
+  };
+});
 
 /**
  * ESPN headshot for the drafted player, or the team logo for a D/ST (their
@@ -62,7 +77,7 @@ export function PickSplash({ pick, player, teamName, isSteal, onDone }: PickSpla
       role="status"
       aria-live="polite"
     >
-      {/* Confetti burst */}
+      {/* Confetti rain */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
         {Array.from({ length: CONFETTI_COUNT }, (_, i) => (
           <span
@@ -80,79 +95,128 @@ export function PickSplash({ pick, player, teamName, isSteal, onDone }: PickSpla
         ))}
       </div>
 
-      {/* Announcement card */}
-      <div className="pick-splash-card relative text-center px-6 py-8 max-w-lg mx-4">
-        {/* Position-colored glow behind the name */}
-        <div
-          className="pick-splash-glow"
-          style={{ background: `var(--${player.position.toLowerCase()}, var(--accent))` }}
-          aria-hidden
-        />
+      {/* Full-screen detonation flash */}
+      <div className="splash-screenflash" aria-hidden />
 
-        <div className="relative space-y-3">
-          <div className="text-[11px] font-mono font-bold uppercase tracking-[0.25em] text-muted">
-            Pick {formatPickLabel(pick.round, pick.pick_in_round)} · #{pick.overall_pick} overall
-          </div>
+      {/* Everything inside jolts with the blast — camera shake, not card wobble */}
+      <div className="splash-quake">
+        {/* Viewport-scale blast: shockwaves, aftershock, embers, smoke */}
+        <div className="blast-layer" aria-hidden>
+          <div className="blast-ring" style={{ borderColor: posVar }} />
+          <div className="blast-ring blast-ring-2" style={{ borderColor: posVar }} />
+          <div className="blast-ring blast-ring-3" style={{ borderColor: posVar }} />
+          <div className="blast-ring blast-aftershock" style={{ borderColor: posVar }} />
+          {EMBERS.map((e, i) => (
+            <span
+              key={i}
+              className="blast-ember"
+              style={{
+                "--dx": `${e.dx}px`,
+                "--dy": `${e.dy}px`,
+                width: `${e.size}px`,
+                height: `${e.size}px`,
+                background: `var(${e.color})`,
+                animationDelay: `${250 + e.delay}ms`,
+              } as React.CSSProperties}
+            />
+          ))}
+          {[-90, 0, 90].map((dx, i) => (
+            <span
+              key={i}
+              className="blast-smoke"
+              style={{
+                "--dx": `${dx}px`,
+                animationDelay: `${500 + i * 120}ms`,
+              } as React.CSSProperties}
+            />
+          ))}
+        </div>
 
-          <div className="text-lg font-bold text-foreground/80">
-            {teamName}
-            <span className="block text-[10px] font-semibold uppercase tracking-[0.3em] text-muted mt-1">
-              selects
-            </span>
-          </div>
+        {/* Announcement card */}
+        <div className="pick-splash-card relative text-center px-6 py-8 max-w-lg mx-4">
+          {/* Position-colored glow behind the name */}
+          <div
+            className="pick-splash-glow"
+            style={{ background: posVar }}
+            aria-hidden
+          />
 
-          {imageUrl && (
-            <div className="relative flex justify-center">
-              {/* Explosion behind the headshot: flash, shockwave ring, shards */}
-              <div className="splash-boom" aria-hidden>
-                <div
-                  className="splash-flash"
-                  style={{
-                    background: `radial-gradient(circle, ${posVar} 0%, transparent 70%)`,
+          <div className="relative space-y-3">
+            <div className="text-[11px] font-mono font-bold uppercase tracking-[0.25em] text-muted">
+              Pick {formatPickLabel(pick.round, pick.pick_in_round)} · #{pick.overall_pick} overall
+            </div>
+
+            <div className="text-lg font-bold text-foreground/80">
+              {teamName}
+              <span className="block text-[10px] font-semibold uppercase tracking-[0.3em] text-muted mt-1">
+                selects
+              </span>
+            </div>
+
+            {imageUrl && (
+              <div className="relative flex justify-center">
+                {/* Fireball and shards detonate behind the headshot */}
+                <div className="splash-boom" aria-hidden>
+                  <div
+                    className="splash-flash"
+                    style={{
+                      background: `radial-gradient(circle, #fff 0%, ${posVar} 30%, transparent 70%)`,
+                    }}
+                  />
+                  {Array.from({ length: SHARD_COUNT }, (_, i) => (
+                    <span
+                      key={`s1-${i}`}
+                      className="splash-shard"
+                      style={{
+                        "--a": `${i * (360 / SHARD_COUNT)}deg`,
+                        "--dist": "240px",
+                        background: `var(${CONFETTI_COLORS[i % CONFETTI_COLORS.length]})`,
+                      } as React.CSSProperties}
+                    />
+                  ))}
+                  {Array.from({ length: SHARD_COUNT_2 }, (_, i) => (
+                    <span
+                      key={`s2-${i}`}
+                      className="splash-shard splash-shard-2"
+                      style={{
+                        "--a": `${(i + 0.5) * (360 / SHARD_COUNT_2)}deg`,
+                        "--dist": "155px",
+                        background: `var(${CONFETTI_COLORS[(i + 3) % CONFETTI_COLORS.length]})`,
+                      } as React.CSSProperties}
+                    />
+                  ))}
+                </div>
+                <img
+                  src={imageUrl}
+                  alt={player.name}
+                  className="splash-photo relative w-40 max-h-32 object-contain drop-shadow-2xl"
+                  onError={(e) => {
+                    e.currentTarget.style.display = "none";
                   }}
                 />
-                <div className="splash-shockwave" style={{ borderColor: posVar }} />
-                {Array.from({ length: SHARD_COUNT }, (_, i) => (
-                  <span
-                    key={i}
-                    className="splash-shard"
-                    style={{
-                      "--a": `${i * (360 / SHARD_COUNT)}deg`,
-                      background: `var(${CONFETTI_COLORS[i % CONFETTI_COLORS.length]})`,
-                    } as React.CSSProperties}
-                  />
-                ))}
               </div>
-              <img
-                src={imageUrl}
-                alt={player.name}
-                className="splash-photo relative w-40 max-h-32 object-contain drop-shadow-2xl"
-                onError={(e) => {
-                  e.currentTarget.style.display = "none";
-                }}
-              />
+            )}
+
+            <div
+              className={`pick-splash-name text-4xl sm:text-5xl font-black tracking-tight uppercase leading-none ${posText}`}
+            >
+              {player.name}
             </div>
-          )}
 
-          <div
-            className={`pick-splash-name text-4xl sm:text-5xl font-black tracking-tight uppercase leading-none ${posText}`}
-          >
-            {player.name}
-          </div>
+            <div className="text-sm font-semibold text-foreground/70">
+              {player.position}
+              {player.nfl_team && <span className="text-muted"> · {player.nfl_team}</span>}
+              {player.bye_week && (
+                <span className="text-muted/60 text-xs"> · Bye {player.bye_week}</span>
+              )}
+            </div>
 
-          <div className="text-sm font-semibold text-foreground/70">
-            {player.position}
-            {player.nfl_team && <span className="text-muted"> · {player.nfl_team}</span>}
-            {player.bye_week && (
-              <span className="text-muted/60 text-xs"> · Bye {player.bye_week}</span>
+            {isSteal && (
+              <div className="steal-stamp inline-block border-[3px] border-accent text-accent font-black text-xl uppercase tracking-[0.2em] px-4 py-1 rounded-md">
+                Steal
+              </div>
             )}
           </div>
-
-          {isSteal && (
-            <div className="steal-stamp inline-block border-[3px] border-accent text-accent font-black text-xl uppercase tracking-[0.2em] px-4 py-1 rounded-md">
-              Steal
-            </div>
-          )}
         </div>
       </div>
     </div>
